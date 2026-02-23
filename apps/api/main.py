@@ -61,6 +61,7 @@ from .load_documents import router as load_documents_router, create_load_documen
 from .load_ownership import normalized_fields_for_new_load, normalized_ownership_patch_for_load
 from .consents import router as consents_router
 from .calendar_integrations import router as calendar_router
+from .help_center import router as help_center_router
 
 # Shared API models used by response_model=... and request bodies in this module.
 from .models import (
@@ -444,6 +445,9 @@ store = ResponseStore(base_dir=str(Path(__file__).resolve().parents[2] / "data")
 # --- FastAPI App ---
 
 app = FastAPI(title="FreightPower API")
+
+# Make the ResponseStore available to routers via request.app.state.store
+app.state.store = store
 
 app.add_middleware(
     CORSMiddleware,
@@ -8136,9 +8140,17 @@ app.include_router(finance_router)
 app.include_router(load_documents_router)
 app.include_router(consents_router)
 app.include_router(calendar_router)
+app.include_router(help_center_router)
 
 @app.on_event("startup")
 def startup_events():
+    # Build/refresh the embedded KB index (includes Help Center docs under data/kb).
+    # This is required for semantic search and the Help Center AI context.
+    try:
+        bootstrap_knowledge_base(store)
+    except Exception as e:
+        print(f"[KB] bootstrap failed: {e}")
+
     scheduler.start()
     init_finance_scheduler(scheduler)
     scheduler.add_interval_job(_refresh_fmcsa_all, minutes=60 * 24, id="fmcsa_refresh_daily")
