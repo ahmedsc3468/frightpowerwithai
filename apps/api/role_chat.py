@@ -45,6 +45,8 @@ _ALLOWED_TOOLS = {
     "get_earnings_snapshot",
     "get_marketplace_loads",
     "get_nearby_services",
+    "get_location_snapshot",
+    "get_associated_drivers",
 }
 _SUPPORTED_ROLES = {"shipper", "carrier", "driver", "admin"}
 _ROLE_TOOL_ACCESS = {
@@ -67,6 +69,7 @@ _ROLE_TOOL_ACCESS = {
         "get_earnings_snapshot",
         "get_marketplace_loads",
         "get_nearby_services",
+        "get_associated_drivers",
     },
     "driver": {
         "list_my_loads",
@@ -76,6 +79,8 @@ _ROLE_TOOL_ACCESS = {
         "get_compliance_tasks",
         "get_earnings_snapshot",
         "get_nearby_services",
+        "get_location_snapshot",
+        "get_associated_drivers",
     },
     "admin": {
         "get_compliance_tasks",
@@ -83,6 +88,7 @@ _ROLE_TOOL_ACCESS = {
         "get_earnings_snapshot",
         "get_marketplace_loads",
         "get_nearby_services",
+        "get_associated_drivers",
     },
 }
 _ROLE_LABEL = {
@@ -708,12 +714,33 @@ def _build_context_snapshot(
             driver_data = driver_snap.to_dict() if getattr(driver_snap, "exists", False) else {}
         except Exception:
             driver_data = {}
+        carrier_id = str(driver_data.get("carrier_id") or "").strip()
+        associated_driver_count = 0
+        if carrier_id:
+            try:
+                associated_driver_count = len(
+                    list(db.collection("drivers").where("carrier_id", "==", carrier_id).limit(200).stream())
+                )
+            except Exception:
+                associated_driver_count = 0
+        latest_location = _latest_driver_load_location(loads)
         role_specific = {
             "marketplace_views_count": int(
                 driver_data.get("marketplace_views_count", user_data.get("marketplace_views_count", 0)) or 0
             ),
             "availability_on": bool(driver_data.get("is_available", user_data.get("is_available", False))),
+            "carrier_id": carrier_id or None,
+            "associated_driver_count": int(associated_driver_count),
             "required_docs": _build_driver_required_docs_summary(user_data),
+            "latest_location": {
+                "latitude": latest_location.get("latitude"),
+                "longitude": latest_location.get("longitude"),
+                "timestamp": latest_location.get("timestamp"),
+                "source": latest_location.get("source"),
+                "load_id": latest_location.get("load_id"),
+            }
+            if latest_location
+            else None,
         }
     elif role_scope == "carrier":
         delivered = int(status_counts.get("delivered", 0) + status_counts.get("completed", 0))
@@ -1363,10 +1390,229 @@ def _tool_get_nearby_services(uid: str, role_scope: str, args: Dict[str, Any]) -
     return {"services": rows, "total": len(rows), "category_filter": category_filter or None}
 
 
+def _coerce_location_point(value: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(value, dict):
+        return None
+    lat = value.get("latitude")
+    lng = value.get("longitude")
+    try:
+        lat_f = float(lat)
+        lng_f = float(lng)
+    except Exception:
+        return None
+    return {
+        "latitude": lat_f,
+        "longitude": lng_f,
+        "timestamp": _coerce_ts(value.get("timestamp"), 0.0),
+    }
+
+
+def _latest_driver_load_location(loads: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    candidates: List[Dict[str, Any]] = []
+    for load in loads[:250]:
+        if not isinstance(load, dict):
+            continue
+        load_id = str(load.get("load_id") or "").strip() or None
+        for field in ("current_location", "last_location"):
+            point = _coerce_location_point(load.get(field))
+            if not point:
+                continue
+            point["source"] = field
+            point["load_id"] = load_id
+            point["load_number"] = load.get("load_number")
+            point["load_status"] = str(load.get("status") or "").strip().lower() or None
+            point["origin"] = load.get("origin")
+            point["destination"] = load.get("destination")
+            point["updated_at"] = _coerce_ts(load.get("updated_at"), 0.0)
+            candidates.append(point)
+    if not candidates:
+        return None
+    candidates.sort(
+        key=lambda x: float(x.get("timestamp") or x.get("updated_at") or 0.0),
+        reverse=True,
+    )
+    return candidates[0]
+
+
+def _tool_get_location_snapshot(
+    uid: str,
+    role_scope: str,
+    args: Dict[str, Any],
+    *,
+    preloaded_loads: Optional[List[Dict[str, Any]]] = None,
+    user_data: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    _ = args
+    if role_scope != "driver":
+        raise HTTPException(status_code=403, detail="get_location_snapshot is available for driver accounts only")
+
+    loads = preloaded_loads if isinstance(preloaded_loads, list) else _collect_role_loads(uid, role_scope)
+    live_point = _latest_driver_load_location(loads)
+    if live_point:
+        return {
+            "has_live_location": True,
+            "source": str(live_point.get("source") or "load_location"),
+            "location": {
+                "latitude": live_point.get("latitude"),
+                "longitude": live_point.get("longitude"),
+                "timestamp": live_point.get("timestamp"),
+            },
+            "load": {
+                "load_id": live_point.get("load_id"),
+                "load_number": live_point.get("load_number"),
+                "status": live_point.get("load_status"),
+                "origin": live_point.get("origin"),
+                "destination": live_point.get("destination"),
+            },
+        }
+
+    if not isinstance(user_data, dict):
+        user_snap = db.collection("users").document(uid).get()
+        user_data = user_snap.to_dict() if getattr(user_snap, "exists", False) else {}
+    raw_location = user_data.get("location")
+    if isinstance(raw_location, dict):
+        return {
+            "has_live_location": False,
+            "source": "profile_location",
+            "location": {
+                "latitude": raw_location.get("latitude"),
+                "longitude": raw_location.get("longitude"),
+                "label": raw_location.get("label") or raw_location.get("city") or raw_location.get("address"),
+            },
+        }
+    if isinstance(raw_location, str) and raw_location.strip():
+        return {
+            "has_live_location": False,
+            "source": "profile_location",
+            "location": {"label": raw_location.strip()},
+        }
+
+    return {
+        "has_live_location": False,
+        "source": "unavailable",
+        "location": None,
+        "message": "No driver location is currently available.",
+    }
+
+
+def _tool_get_associated_drivers(
+    uid: str,
+    role_scope: str,
+    args: Dict[str, Any],
+) -> Dict[str, Any]:
+    try:
+        limit = int(args.get("limit", 25))
+    except Exception:
+        limit = 25
+    limit = max(1, min(limit, 200))
+
+    carrier_id = ""
+    if role_scope == "carrier":
+        carrier_id = uid
+    elif role_scope == "driver":
+        try:
+            driver_snap = db.collection("drivers").document(uid).get()
+            driver_data = driver_snap.to_dict() if getattr(driver_snap, "exists", False) else {}
+        except Exception:
+            driver_data = {}
+        carrier_id = str(driver_data.get("carrier_id") or "").strip()
+        if not carrier_id:
+            return {
+                "carrier_id": None,
+                "drivers": [],
+                "total": 0,
+                "message": "You are not currently linked to a carrier, so there are no associated drivers.",
+            }
+    elif role_scope == "admin":
+        carrier_id = str(args.get("carrier_id") or "").strip()
+        if not carrier_id:
+            raise HTTPException(status_code=400, detail="carrier_id is required for admin associated-driver lookups")
+    else:
+        raise HTTPException(status_code=403, detail="get_associated_drivers is not available for this role")
+
+    rows: List[Dict[str, Any]] = []
+    try:
+        snaps = db.collection("drivers").where("carrier_id", "==", carrier_id).limit(limit * 2).stream()
+        for s in snaps:
+            d = s.to_dict() or {}
+            driver_uid = str(d.get("driver_id") or s.id or "").strip()
+            if not driver_uid:
+                continue
+            row = {
+                "driver_id": driver_uid,
+                "name": d.get("name"),
+                "status": d.get("status"),
+                "is_available": bool(d.get("is_available", False)),
+                "vehicle_type": d.get("vehicle_type"),
+            }
+            if not row.get("name"):
+                try:
+                    user_snap = db.collection("users").document(driver_uid).get()
+                    user_data = user_snap.to_dict() if getattr(user_snap, "exists", False) else {}
+                except Exception:
+                    user_data = {}
+                row["name"] = user_data.get("name") or user_data.get("full_name")
+                row["is_available"] = bool(user_data.get("is_available", row["is_available"]))
+            rows.append(row)
+            if len(rows) >= limit:
+                break
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read associated drivers: {e}")
+
+    return {
+        "carrier_id": carrier_id,
+        "drivers": rows,
+        "total": len(rows),
+        "self_included": bool(role_scope == "driver" and any(str(r.get("driver_id")) == uid for r in rows)),
+    }
+
+
 def _infer_tool_from_message(message: str) -> Optional[Dict[str, Any]]:
     text = str(message or "").strip().lower()
     if not text:
         return None
+
+    def _infer_status_from_text(value: str) -> Optional[str]:
+        v = str(value or "").strip().lower()
+        if not v:
+            return None
+        # Match spaced/hyphen variants before generic status scanning.
+        aliases = {
+            "in transit": "in_transit",
+            "in-transit": "in_transit",
+            "posted": "posted",
+            "covered": "covered",
+            "delivered": "delivered",
+            "completed": "completed",
+            "cancelled": "cancelled",
+            "canceled": "cancelled",
+            "accepted": "accepted",
+            "tendered": "tendered",
+            "draft": "draft",
+        }
+        for key, normalized in aliases.items():
+            if key in v:
+                return normalized
+        for s in sorted(_VALID_LOAD_STATUSES):
+            if s in v:
+                return s
+        return None
+
+    if (
+        "my location" in text
+        or "where am i" in text
+        or "where i am" in text
+        or ("location" in text and ("current" in text or "live" in text))
+    ):
+        return {"name": "get_location_snapshot", "args": {}}
+
+    if (
+        "associated drivers" in text
+        or "drivers associated" in text
+        or ("my drivers" in text and "load" not in text)
+        or ("other drivers" in text and "me" in text)
+    ):
+        return {"name": "get_associated_drivers", "args": {"limit": 25}}
 
     if ("required" in text and "document" in text) or ("missing docs" in text):
         return {"name": "get_required_documents", "args": {}}
@@ -1383,16 +1629,26 @@ def _infer_tool_from_message(message: str) -> Optional[Dict[str, Any]]:
     if "marketplace" in text and ("load" in text or "posted" in text):
         return {"name": "get_marketplace_loads", "args": {"limit": 10}}
 
+    status_hint = _infer_status_from_text(text)
+    count_intent = any(k in text for k in ("how many", "count", "number of", "total"))
+    if "load" in text and count_intent:
+        if status_hint:
+            return {"name": "list_my_loads", "args": {"status": status_hint, "limit": 100}}
+        return {"name": "get_load_summary", "args": {}}
+
+    if "load" in text and ("posted" in text or "covered" in text or "in transit" in text):
+        if status_hint:
+            return {"name": "list_my_loads", "args": {"status": status_hint, "limit": 50}}
+
+    if "offer" in text and "pending" in text:
+        return {"name": "get_load_summary", "args": {}}
+
     # Non-mutating inference only. Mutating tools require explicit tool_name.
     if "summary" in text and "load" in text:
         return {"name": "get_load_summary", "args": {}}
 
     if ("list" in text and "load" in text) or ("my loads" in text):
-        status = None
-        for s in sorted(_VALID_LOAD_STATUSES):
-            if s in text:
-                status = s
-                break
+        status = status_hint
         args = {"limit": 10}
         if status:
             args["status"] = status
@@ -1443,6 +1699,16 @@ def _execute_tool(
         return _tool_get_marketplace_loads(uid, role_scope, args)
     if name == "get_nearby_services":
         return _tool_get_nearby_services(uid, role_scope, args)
+    if name == "get_location_snapshot":
+        return _tool_get_location_snapshot(
+            uid,
+            role_scope,
+            args,
+            preloaded_loads=preloaded_loads,
+            user_data=user_data,
+        )
+    if name == "get_associated_drivers":
+        return _tool_get_associated_drivers(uid, role_scope, args)
     raise HTTPException(status_code=400, detail=f"Unsupported tool '{name}'")
 
 
@@ -1475,7 +1741,11 @@ def _compose_fallback_reply(
                         f"{r.get('load_id')} ({r.get('status')}) {r.get('origin')} -> {r.get('destination')}"
                         for r in rows[:5]
                     ]
-                    blocks.append("Top loads: " + "; ".join(items))
+                    blocks.append(
+                        f"Total matching loads: {int((data or {}).get('total') or len(rows))}. "
+                        + "Top loads: "
+                        + "; ".join(items)
+                    )
             elif t.name == "get_load_offers":
                 rows = data.get("offers") or []
                 if not rows:
@@ -1524,13 +1794,38 @@ def _compose_fallback_reply(
                 blocks.append(f"Marketplace posted loads found: {(data or {}).get('total', 0)}.")
             elif t.name == "get_nearby_services":
                 blocks.append(f"Nearby services found: {(data or {}).get('total', 0)}.")
+            elif t.name == "get_location_snapshot":
+                location = (data or {}).get("location") or {}
+                if not location:
+                    blocks.append("No live location is currently available for your profile.")
+                elif location.get("latitude") is not None and location.get("longitude") is not None:
+                    blocks.append(
+                        "Current known location: "
+                        f"{location.get('latitude')}, {location.get('longitude')} "
+                        f"(source: {(data or {}).get('source')})."
+                    )
+                else:
+                    blocks.append(f"Current known location: {location.get('label') or 'unknown'}.")
+            elif t.name == "get_associated_drivers":
+                rows = (data or {}).get("drivers") or []
+                if not rows:
+                    blocks.append("No associated drivers found.")
+                else:
+                    names = [str(r.get("name") or r.get("driver_id") or "").strip() for r in rows[:6]]
+                    names = [n for n in names if n]
+                    blocks.append(
+                        f"Associated drivers ({(data or {}).get('total', len(rows))}): "
+                        + ", ".join(names)
+                        + "."
+                    )
             else:
                 blocks.append(f"Tool `{t.name}` executed successfully.")
         return "\n".join(blocks)
 
     return (
         f"I can help with your {_ROLE_LABEL.get(role_scope, 'user').lower()} workflow. "
-        "Ask for load summary, compliance tasks, required documents, earnings snapshot, or nearby services."
+        "Ask for load summary, compliance tasks, required documents, earnings snapshot, nearby services, "
+        "current location, or associated drivers."
     )
 
 
@@ -1693,6 +1988,7 @@ async def role_assistant_chat(
         "accept_offer",
         "reject_offer",
         "get_earnings_snapshot",
+        "get_location_snapshot",
     }
     if selected_tool_name in load_tools:
         try:

@@ -223,6 +223,7 @@ def assistant_env(monkeypatch):
             "carrier_id": "carrier1",
             "created_by": "shipper1",
             "offers": [],
+            "last_location": {"latitude": 33.4484, "longitude": -112.0740, "timestamp": 1772542200.0},
         }
     )
     fake_db.collection("marketplace_services").document("svc_1").set(
@@ -236,6 +237,27 @@ def assistant_env(monkeypatch):
                 {"key": "consent", "title": "Consent"},
             ]
         }
+    )
+    fake_db.collection("drivers").document("driver1").set(
+        {
+            "driver_id": "driver1",
+            "name": "Abbas Khan",
+            "carrier_id": "carrier1",
+            "is_available": True,
+            "status": "active",
+        }
+    )
+    fake_db.collection("drivers").document("driver2").set(
+        {
+            "driver_id": "driver2",
+            "name": "Driver Two",
+            "carrier_id": "carrier1",
+            "is_available": False,
+            "status": "active",
+        }
+    )
+    fake_db.collection("users").document("driver2").set(
+        {"name": "Driver Two", "is_available": False}
     )
 
     client = TestClient(main.app)
@@ -349,6 +371,105 @@ def test_role_assistant_permissions_for_expanded_tools(assistant_env):
     assert allowed_tools[0].get("ok") is True
     result = allowed_tools[0].get("result") or {}
     assert int(result.get("total") or 0) >= 1
+
+
+def test_role_assistant_infers_and_fetches_driver_location(assistant_env):
+    client = assistant_env["client"]
+    _set_user(
+        assistant_env,
+        {
+            "uid": "driver1",
+            "role": "driver",
+            "name": "Abbas Khan",
+            "onboarding_completed": True,
+        },
+    )
+
+    res = client.post("/chat/assistant", json={"message": "whats my location?"})
+    assert res.status_code == 200
+    payload = res.json() or {}
+    tools = payload.get("tools_executed") or []
+    assert len(tools) == 1
+    assert tools[0].get("name") == "get_location_snapshot"
+    assert tools[0].get("ok") is True
+    location = ((tools[0].get("result") or {}).get("location") or {})
+    assert float(location.get("latitude")) == pytest.approx(33.4484)
+    assert float(location.get("longitude")) == pytest.approx(-112.074)
+
+
+def test_role_assistant_infers_and_fetches_associated_drivers(assistant_env):
+    client = assistant_env["client"]
+    _set_user(
+        assistant_env,
+        {
+            "uid": "driver1",
+            "role": "driver",
+            "name": "Abbas Khan",
+            "onboarding_completed": True,
+        },
+    )
+
+    res = client.post("/chat/assistant", json={"message": "who are the drivers associated with me"})
+    assert res.status_code == 200
+    payload = res.json() or {}
+    tools = payload.get("tools_executed") or []
+    assert len(tools) == 1
+    assert tools[0].get("name") == "get_associated_drivers"
+    assert tools[0].get("ok") is True
+    result = tools[0].get("result") or {}
+    assert str(result.get("carrier_id") or "") == "carrier1"
+    assert int(result.get("total") or 0) >= 2
+    names = {str(r.get("name") or "") for r in (result.get("drivers") or [])}
+    assert "Abbas Khan" in names
+    assert "Driver Two" in names
+
+
+def test_shipper_natural_language_posted_count_uses_live_load_tool(assistant_env):
+    client = assistant_env["client"]
+    _set_user(
+        assistant_env,
+        {
+            "uid": "shipper1",
+            "role": "shipper",
+            "name": "Shipper One",
+            "onboarding_completed": True,
+        },
+    )
+
+    res = client.post("/chat/assistant", json={"message": "how many loads have i posted from day 1"})
+    assert res.status_code == 200
+    payload = res.json() or {}
+    tools = payload.get("tools_executed") or []
+    assert len(tools) == 1
+    assert tools[0].get("name") == "list_my_loads"
+    assert tools[0].get("ok") is True
+    result = tools[0].get("result") or {}
+    assert str(result.get("status_filter") or "") == "posted"
+    assert int(result.get("total") or 0) == 1
+
+
+def test_shipper_natural_language_in_transit_count_uses_status_alias(assistant_env):
+    client = assistant_env["client"]
+    _set_user(
+        assistant_env,
+        {
+            "uid": "shipper1",
+            "role": "shipper",
+            "name": "Shipper One",
+            "onboarding_completed": True,
+        },
+    )
+
+    res = client.post("/chat/assistant", json={"message": "how many loads are currently in transit?"})
+    assert res.status_code == 200
+    payload = res.json() or {}
+    tools = payload.get("tools_executed") or []
+    assert len(tools) == 1
+    assert tools[0].get("name") == "list_my_loads"
+    assert tools[0].get("ok") is True
+    result = tools[0].get("result") or {}
+    assert str(result.get("status_filter") or "") == "in_transit"
+    assert int(result.get("total") or 0) == 1
 
 
 def test_role_assistant_preferences_round_trip_and_validation(assistant_env):
