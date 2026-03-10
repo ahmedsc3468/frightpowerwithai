@@ -253,7 +253,15 @@ export default function HiringOnboarding({ onNavigate }) {
                 <li key={idx}><span className="ai-list-icon"><i className="fa-solid fa-lightbulb"></i></span>{txt}</li>
               ))}
             </ul>
-            <button className="btn small ghost-cd dd-btn">{tr('hiringOnboarding.aiRecommendations.chat', 'Chat with AI Assistant')}</button>
+            <button 
+              className="btn small ghost-cd dd-btn"
+              onClick={() => {
+                if (typeof onNavigate === 'function') onNavigate('help');
+                else navigate('/driver-dashboard?nav=help');
+              }}
+            >
+              {tr('hiringOnboarding.aiRecommendations.chat', 'Chat with AI Assistant')}
+            </button>
           </div>
         </div>
       )}
