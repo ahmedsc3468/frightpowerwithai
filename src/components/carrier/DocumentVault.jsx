@@ -136,6 +136,8 @@ function RowActions({ doc, onRefresh }) {
 
 export default function DocumentVault() {
   const { currentUser } = useAuth();
+  const currentUserRef = useRef(currentUser);
+  useEffect(() => { currentUserRef.current = currentUser; }, [currentUser]);
   const [refreshing, setRefreshing] = useState(false);
   const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -258,9 +260,10 @@ export default function DocumentVault() {
 
   // Fetch compliance score
   const fetchComplianceScore = useCallback(async () => {
-    if (!currentUser) return;
+    const user = currentUserRef.current;
+    if (!user) return;
     try {
-      const token = await currentUser.getIdToken();
+      const token = await user.getIdToken();
       const response = await fetch(`${API_URL}/compliance/status`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -275,16 +278,17 @@ export default function DocumentVault() {
     } catch (error) {
       console.error('Error fetching compliance:', error);
     }
-  }, [currentUser]);
+  }, []);
 
   useEffect(() => { fetchComplianceScore(); }, [fetchComplianceScore]);
 
   // Fetch documents from API
   const fetchDocuments = useCallback(async () => {
-    if (!currentUser) return;
+    const user = currentUserRef.current;
+    if (!user) return;
 
     try {
-      const token = await currentUser.getIdToken();
+      const token = await user.getIdToken();
       const response = await fetch(`${API_URL}/documents`, {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -314,14 +318,14 @@ export default function DocumentVault() {
     } finally {
       setLoading(false);
     }
-  }, [currentUser]);
+  }, []);
 
   useEffect(() => {
     fetchDocuments();
   }, [fetchDocuments]);
 
   const refreshAll = useCallback(async ({ showSpinner = false } = {}) => {
-    if (!currentUser) return;
+    if (!currentUserRef.current) return;
     if (showSpinner) setRefreshing(true);
     try {
       await Promise.allSettled([
@@ -331,7 +335,7 @@ export default function DocumentVault() {
     } finally {
       if (showSpinner) setRefreshing(false);
     }
-  }, [currentUser, fetchDocuments, fetchComplianceScore]);
+  }, [fetchDocuments, fetchComplianceScore]);
 
   // Time-based auto-refresh (5 minutes) for Document Vault data.
   useEffect(() => {

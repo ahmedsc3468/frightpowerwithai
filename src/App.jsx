@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, useLocation, Navigate } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom'
 import LandingPage from './components/landing_page/LandingPage'
 import HelpCenter from './components/landing_page/HelpCenter'
 import RoleSelection from './components/landing_page/RoleSelection'
@@ -22,16 +22,17 @@ import ProtectedRoute from './components/ProtectedRoute'
 import './App.css'
 
 import Chatbot from './components/landing_page/Chatbot'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 // 🛑 ADDED: Import for the Password Reset component 🛑
 // BEFORE (Fails, because it looks for the file in the root of 'components'):
 // import ForgotPassword from "./components/ForgotPassword"; 
 
 // AFTER (Correct, navigates into the sub-folder):
-import ForgotPassword from "./components/forgot-password";
+import ForgotPassword from "./components/forgot-password"
 
 import AI from '/src/assets/chatbot.svg'
+import { setNavigate } from './utils/navigateService'
 
 function App() {
   const [chatOpen, setChatOpen] = useState(false)
@@ -45,7 +46,12 @@ function App() {
 
 function InnerRoutes({ chatOpen, chatMinimized, setChatOpen, setChatMinimized }){
   const location = useLocation()
+  const navigate = useNavigate()
   const showChat = location.pathname === '/'
+
+  useEffect(() => {
+    setNavigate(navigate)
+  }, [navigate])
 
   return (
     <>

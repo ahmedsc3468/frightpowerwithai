@@ -109,6 +109,27 @@ const Verification = () => {
     setLoading(false);
   };
 
+  const handleResend = async () => {
+    if (!phone || loading) return;
+    setError("");
+    setOtp(new Array(6).fill(""));
+    setConfirmObj(null);
+    hasSentOtp.current = false;
+    setLoading(true);
+    try {
+      const confirmation = await sendOtp(phone);
+      setConfirmObj(confirmation);
+      setTimer(59);
+      hasSentOtp.current = true;
+    } catch (err) {
+      console.error("Resend OTP Error:", err);
+      setError("Failed to resend code: " + err.message);
+      hasSentOtp.current = false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="verification-page">
       <div id="recaptcha-container"></div>
@@ -153,7 +174,8 @@ const Verification = () => {
               <>Resend code in <span>00:{timer.toString().padStart(2, '0')}</span></>
             ) : (
               <button 
-                onClick={() => window.location.reload()} 
+                onClick={handleResend}
+                disabled={loading}
                 style={{background:'none', border:'none', color:'#2563eb', cursor:'pointer', fontWeight:600}}
               >
                 Resend Code
