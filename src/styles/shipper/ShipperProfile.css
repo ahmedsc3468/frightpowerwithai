@@ -1,0 +1,98 @@
+/* ────────────────────────────────────────────────────
+   ShipperProfile.css
+   Extra styles that layer on top of AccountSettings.css
+──────────────────────────────────────────────────── */
+
+/* Buttons shared across the profile page */
+.btn.small-cd {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  background: #3b82f6;
+  color: #fff;
+  transition: background 0.15s, opacity 0.15s;
+}
+.btn.small-cd:hover:not(:disabled) { background: #2563eb; }
+.btn.small-cd:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.btn.small.ghost-cd {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1.5px solid #3b82f6;
+  background: transparent;
+  color: #3b82f6;
+  transition: background 0.15s, opacity 0.15s;
+}
+.btn.small.ghost-cd:hover:not(:disabled) { background: #eff6ff; }
+.btn.small.ghost-cd:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* Dark-mode btn overrides */
+.dark-root .btn.small.ghost-cd:hover:not(:disabled) { background: #1e3a5f; }
+
+/* profile-field inputs/textareas */
+.profile-field {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 14px;
+}
+.profile-field label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.profile-field input,
+.profile-field textarea,
+.profile-field select {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  font-size: 14px;
+  background: #fff;
+  color: #0f172a;
+  transition: border-color 0.15s;
+  resize: vertical;
+}
+.profile-field input:focus,
+.profile-field textarea:focus,
+.profile-field select:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59,130,246,.12);
+}
+
+/* Dark mode overrides */
+.dark-root .profile-field label { color: #94a3b8; }
+.dark-root .profile-field input,
+.dark-root .profile-field textarea,
+.dark-root .profile-field select {
+  background: #1e293b;
+  color: #f1f5f9;
+  border-color: #334155;
+}
+.dark-root .profile-field input:focus,
+.dark-root .profile-field textarea:focus,
+.dark-root .profile-field select:focus {
+  border-color: #3b82f6;
+}
+
+/* Responsive: stack to single column on narrow screens */
+@media (max-width: 640px) {
+  .profile-preferences-section {
+    grid-template-columns: 1fr !important;
+  }
+}

@@ -1335,3 +1335,88 @@ async def get_driver_required_docs(user: Dict[str, Any] = Depends(get_current_us
         },
     }
 
+
+# ============================================================================
+# Shipper Onboarding Endpoints
+# ============================================================================
+
+# Fields required for a shipper to be considered 'onboarded'
+_SHIPPER_REQUIRED_FIELDS: list[str] = ["company_name", "phone", "address", "name"]
+_SHIPPER_OPTIONAL_FIELDS: list[str] = ["business_type", "tax_id", "website", "billing_address", "contact_title"]
+_SHIPPER_REQUIRED_DOCS: list[str] = []    # e.g. ["w9"] — add as needed
+
+
+@router.get("/shipper/missing")
+async def get_shipper_missing(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    """Return the missing required/optional fields and documents for a shipper profile."""
+    missing_required: list[str] = []
+    missing_optional: list[str] = []
+    missing_documents: list[str] = []
+
+    for field in _SHIPPER_REQUIRED_FIELDS:
+        val = user.get(field)
+        if not val or (isinstance(val, str) and not val.strip()):
+            missing_required.append(field)
+
+    for field in _SHIPPER_OPTIONAL_FIELDS:
+        val = user.get(field)
+        if not val or (isinstance(val, str) and not val.strip()):
+            missing_optional.append(field)
+
+    # Document checks (currently none required by default)
+    uid = user.get("uid", "")
+    if uid and _SHIPPER_REQUIRED_DOCS:
+        onboarding_data_str = user.get("onboarding_data") or "{}"
+        try:
+            od = json.loads(onboarding_data_str) if isinstance(onboarding_data_str, str) else {}
+        except Exception:
+            od = {}
+        uploaded_types = {
+            str(d.get("submitted_type") or d.get("document_type") or "").lower()
+            for d in (od.get("documents") or [])
+            if isinstance(d, dict)
+        }
+        for doc_key in _SHIPPER_REQUIRED_DOCS:
+            if doc_key not in uploaded_types:
+                missing_documents.append(doc_key)
+
+    return {
+        "missing_required_fields": missing_required,
+        "missing_optional_fields": missing_optional,
+        "missing_documents": missing_documents,
+        "is_complete": len(missing_required) == 0 and len(missing_documents) == 0,
+    }
+
+
+@router.post("/shipper/complete")
+async def complete_shipper_onboarding(user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
+    """Mark shipper onboarding as complete (if all required fields/documents are present)."""
+    uid = user.get("uid")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    # Verify required fields are actually filled
+    missing_required: list[str] = []
+    for field in _SHIPPER_REQUIRED_FIELDS:
+        val = user.get(field)
+        if not val or (isinstance(val, str) and not val.strip()):
+            missing_required.append(field)
+
+    if missing_required:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot complete onboarding — missing required fields: {missing_required}",
+        )
+
+    now = time.time()
+    db.collection("users").document(uid).set(
+        {
+            "onboarding_completed": True,
+            "onboarding_step": "COMPLETED",
+            "updated_at": now,
+        },
+        merge=True,
+    )
+    log_action(uid, "SHIPPER_ONBOARDING_COMPLETE", "Shipper onboarding marked complete")
+    return {"success": True, "message": "Onboarding completed successfully"}
+

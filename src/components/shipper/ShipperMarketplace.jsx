@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { API_URL } from '../../config';
 import { AUTO_REFRESH_MS } from '../../constants/refresh';
 import AddLoads from '../carrier/AddLoads';
+import InviteCarrierModal from './InviteCarrierModal';
 
 const MARKETPLACE_THRESHOLD = 60;
 const ACCESS_CACHE_PREFIX = 'fp_shipper_marketplace_access_v1:';
@@ -79,6 +80,10 @@ export default function ShipperMarketplace() {
   const [shipperInsights, setShipperInsights] = useState(null);
   const [shipperInsightsLoading, setShipperInsightsLoading] = useState(false);
   const [shipperInsightsError, setShipperInsightsError] = useState('');
+  const [providersTotalAll, setProvidersTotalAll] = useState(0);
+  const [inviteModalOpen, setInviteModalOpen] = useState(false);
+  const [selectedCarrierForInvite, setSelectedCarrierForInvite] = useState(null);
+  const [snapshotCarrier, setSnapshotCarrier] = useState(null);
 
   const categories = ['All Categories', 'Factoring', 'Insurance', 'Compliance', 'Legal', 'Repair', 'Medical', 'Testing', 'Dispatch'];
 
@@ -431,6 +436,26 @@ export default function ShipperMarketplace() {
     }
   }, [currentUser, isMarketplaceReady, activeTab, selectedCategory]);
 
+  // Keep an unfiltered provider total for top dashboard cards.
+  useEffect(() => {
+    const fetchProvidersTotal = async () => {
+      if (!currentUser || !isMarketplaceReady) return;
+      try {
+        const token = await currentUser.getIdToken();
+        const response = await fetch(`${API_URL}/service-providers`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!response.ok) return;
+        const data = await response.json();
+        setProvidersTotalAll(Number(data.total || (data.providers || []).length || 0));
+      } catch (error) {
+        console.error('Error fetching providers total:', error);
+      }
+    };
+
+    fetchProvidersTotal();
+  }, [currentUser, isMarketplaceReady]);
+
   const handleLoadAdded = () => {
     setShowAddLoads(false);
     // Refetch loads
@@ -576,7 +601,7 @@ export default function ShipperMarketplace() {
   // Convert shipper loads to listings format
   const allListings = shipperLoads.map(load => ({
     id: load.load_id,
-    lane: `${load.origin} â†’ ${load.destination}`,
+    lane: `${load.origin || 'N/A'} -> ${load.destination || 'N/A'}`,
     equipment: load.equipment_type || 'N/A',
     offerCount: load.offers ? load.offers.length : 0,
     postedOn: load.created_at ? new Date(load.created_at * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'N/A',
@@ -659,10 +684,47 @@ export default function ShipperMarketplace() {
     return 'AI analysis uses your load and offer activity to recommend lane and carrier actions.';
   })();
 
+  const insightSummary = shipperInsights?.summary || {};
+  const activeLoadsCount = Number(insightSummary?.active_loads || 0);
+  const postedLoadsCount = Number(insightSummary?.posted_loads || 0);
+  const pendingOffersCount = Number(insightSummary?.pending_offers || 0);
+  const complianceWarningCount = Number(insightSummary?.compliance_warning_count || 0);
+
+  const publicListingsCount = marketplaceLoads.length;
+  const newTodayListingsCount = shipperLoads.filter((load) => {
+    const ts = Number(load?.created_at || 0);
+    return ts > 0 && ((Date.now() / 1000) - ts) <= 86400;
+  }).length;
+
+  const verifiedCarriersCount = carriers.length;
+  const compliantCarrierCount = carriers.filter((carrier) => {
+    const compliance = String(carrier?.compliance || '').toLowerCase();
+    if (compliance.includes('valid') || compliance.includes('active') || compliance.includes('verified')) return true;
+    const score = Number(carrier?.compliance_score || 0);
+    return score >= 80;
+  }).length;
+  const carrierCompliancePct = verifiedCarriersCount > 0
+    ? Math.round((compliantCarrierCount / verifiedCarriersCount) * 100)
+    : 0;
+
+  const aiMatchesCount = (Array.isArray(shipperInsights?.ai_suggestions) ? shipperInsights.ai_suggestions.length : 0) || marketInsights.length || pendingOffersCount;
+
+  const primaryRecommendation = displayedMarketInsights[0] || null;
+  const secondaryRecommendation = displayedMarketInsights[1] || null;
+
   const runMarketInsightAction = (actionTarget) => {
     const target = String(actionTarget || '').trim();
     if (!target || target === 'marketplace') return;
     window.location.href = `/shipper-dashboard?nav=${encodeURIComponent(target)}`;
+  };
+
+  const openInviteForCarrier = (carrier) => {
+    setSelectedCarrierForInvite(carrier || null);
+    setInviteModalOpen(true);
+  };
+
+  const openCarrierSnapshot = (carrier) => {
+    setSnapshotCarrier(carrier || null);
   };
 
   return (
@@ -676,8 +738,8 @@ export default function ShipperMarketplace() {
               <i className="fa-solid fa-list"/>
             </div>
           </div>
-          <div className="card-number">12</div>
-          <div className="card-subtitle">3 new today</div>
+          <div className="card-number">{publicListingsCount}</div>
+          <div className="card-subtitle">{newTodayListingsCount} new today</div>
         </div>
 
         <div className="dashboard-card">
@@ -687,8 +749,8 @@ export default function ShipperMarketplace() {
               <i className="fa-solid fa-question"/>
             </div>
           </div>
-          <div className="card-number">2,847</div>
-          <div className="card-subtitle">98% compliant</div>
+          <div className="card-number">{verifiedCarriersCount}</div>
+          <div className="card-subtitle">{carrierCompliancePct}% compliant</div>
         </div>
 
         <div className="dashboard-card">
@@ -698,8 +760,8 @@ export default function ShipperMarketplace() {
               <i className="fa-solid fa-handshake"/>
             </div>
           </div>
-          <div className="card-number">156</div>
-          <div className="card-subtitle">24 categories</div>
+          <div className="card-number">{providersTotalAll || serviceProviders.length}</div>
+          <div className="card-subtitle">{new Set((serviceProviders || []).map((p) => String(p?.category || '').trim()).filter(Boolean)).size || 0} categories</div>
         </div>
 
         <div className="dashboard-card">
@@ -709,8 +771,8 @@ export default function ShipperMarketplace() {
               <i className="fa-solid fa-lightbulb"/>
             </div>
           </div>
-          <div className="card-number">8</div>
-          <div className="card-subtitle">Ready to review</div>
+          <div className="card-number">{aiMatchesCount}</div>
+          <div className="card-subtitle">{pendingOffersCount} pending offers</div>
         </div>
       </div>
 
@@ -932,8 +994,22 @@ export default function ShipperMarketplace() {
                 </div>
               </div>
               <div className="carrier-actions">
-              <button className="btn small-cd" style={{width: '100%'}}>Snapshot</button>
-              <button className="btn small ghost-cd" style={{width: '100%'}}>Invite</button>
+              <button
+                className="btn small-cd"
+                style={{width: '100%'}}
+                type="button"
+                onClick={() => openCarrierSnapshot(carrier)}
+              >
+                Snapshot
+              </button>
+              <button
+                className="btn small ghost-cd"
+                style={{width: '100%'}}
+                type="button"
+                onClick={() => openInviteForCarrier(carrier)}
+              >
+                Invite
+              </button>
             </div>
           </div>
         ))}
@@ -948,26 +1024,38 @@ export default function ShipperMarketplace() {
         <div className="recommendation-cards">
           <div className="recommendation-card best-fit">
             <div className="recommendation-content">
-              <h4>Best Fit for CHI â†’ DAL Route</h4>
-              <p>Based on equipment type, route history, and ratings</p>
+              <h4>{primaryRecommendation?.title || 'Best Fit Opportunities'}</h4>
+              <p>{primaryRecommendation?.detail || analysisSummaryText}</p>
               <div className="recommendation-summary">
-                <span className="summary-item">3 carriers recommended</span>
-                <span className="summary-item">96% match confidence</span>
+                <span className="summary-item">{activeLoadsCount} active load(s)</span>
+                <span className="summary-item">{postedLoadsCount} posted load(s)</span>
+              </div>
+              <div className="recommendation-meter" aria-label="Match confidence">
+                <div
+                  className="recommendation-meter-fill"
+                  style={{ width: `${Math.min(100, Math.max(10, aiMatchesCount * 15))}%` }}
+                />
               </div>
             </div>
-            <button className="btn small-cd">View Matches</button>
+            <div className="recommendation-side">
+              <div className="rec-badge positive">{Math.min(99, 70 + aiMatchesCount)}% confidence</div>
+              <button className="btn small-cd" onClick={() => runMarketInsightAction(primaryRecommendation?.action_target)}>{primaryRecommendation?.action_label || 'View Matches'}</button>
+            </div>
           </div>
 
           <div className="recommendation-card rate-intel">
             <div className="recommendation-content">
-              <h4>Rate Intelligence Update</h4>
-              <p>Market rates for your active lanes have changed</p>
+              <h4>{secondaryRecommendation?.title || 'Rate Intelligence Update'}</h4>
+              <p>{secondaryRecommendation?.detail || 'Market rates for your active lanes have changed'}</p>
               <div className="rate-changes">
-                <span className="rate-change positive">+$120 avg on CHI-DAL</span>
-                <span className="rate-change negative">-$80 avg on ATL-MIA</span>
+                <span className="rate-change positive">{pendingOffersCount} offer(s) awaiting review</span>
+                <span className="rate-change negative">{complianceWarningCount} compliance warning(s)</span>
               </div>
             </div>
-            <button className="btn small-cd">View Details</button>
+            <div className="recommendation-side">
+              <div className="rec-badge neutral">Live market signal</div>
+              <button className="btn small-cd" onClick={() => runMarketInsightAction(secondaryRecommendation?.action_target)}>{secondaryRecommendation?.action_label || 'View Details'}</button>
+            </div>
           </div>
         </div>
       </div>
@@ -1019,7 +1107,7 @@ export default function ShipperMarketplace() {
             <div key={index} className="table-row">
               <div className="listing-id">{load.load_id}</div>
               <div className="lane">
-                <div>{load.origin} â†’ {load.destination}</div>
+                <div>{load.origin || 'N/A'} -> {load.destination || 'N/A'}</div>
                 {load.additional_routes && load.additional_routes.length > 0 && (
                   <div style={{
                     fontSize: '11px',
@@ -1689,6 +1777,46 @@ export default function ShipperMarketplace() {
       )}
       {showAddLoads && <AddLoads onClose={handleLoadAdded} isShipper={true} />}
 
+      <InviteCarrierModal
+        isOpen={inviteModalOpen}
+        onClose={() => {
+          setInviteModalOpen(false);
+          setSelectedCarrierForInvite(null);
+        }}
+        onInviteSent={() => {
+          setInviteModalOpen(false);
+          setSelectedCarrierForInvite(null);
+        }}
+        preselectedCarrier={selectedCarrierForInvite}
+      />
+
+      {snapshotCarrier && (
+        <div className="modal-overlay" onClick={() => setSnapshotCarrier(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '560px', padding: '24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <h3 style={{ margin: 0 }}>Carrier Snapshot</h3>
+              <button type="button" onClick={() => setSnapshotCarrier(null)} style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer' }}>x</button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
+              <div><strong>Name:</strong> {snapshotCarrier.name || snapshotCarrier.company_name || 'N/A'}</div>
+              <div><strong>Rating:</strong> {(Number(snapshotCarrier.rating || 0)).toFixed(1)}</div>
+              <div><strong>DOT:</strong> {snapshotCarrier.dot_number || 'N/A'}</div>
+              <div><strong>MC:</strong> {snapshotCarrier.mc_number || 'N/A'}</div>
+              <div><strong>Region:</strong> {snapshotCarrier.region || (Array.isArray(snapshotCarrier.service_areas) ? snapshotCarrier.service_areas.join(', ') : snapshotCarrier.service_areas) || 'N/A'}</div>
+              <div><strong>Equipment:</strong> {snapshotCarrier.equipment || (Array.isArray(snapshotCarrier.equipment_types) ? snapshotCarrier.equipment_types.join(', ') : snapshotCarrier.equipment_types) || 'N/A'}</div>
+              <div><strong>Loads:</strong> {snapshotCarrier.total_loads || 0}</div>
+              <div><strong>Status:</strong> {snapshotCarrier.status || 'Active'}</div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button className="btn small ghost-cd" type="button" onClick={() => setSnapshotCarrier(null)}>Close</button>
+              <button className="btn small-cd" type="button" onClick={() => { setSnapshotCarrier(null); openInviteForCarrier(snapshotCarrier); }}>Invite Carrier</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Offers Modal */}
       {offersModalOpen && selectedLoadForOffers && (
         <div className="modal-overlay" onClick={() => setOffersModalOpen(false)}>
@@ -1731,7 +1859,7 @@ export default function ShipperMarketplace() {
 
             <div style={{ marginBottom: '25px', padding: '15px', background: '#f8fafc', borderRadius: '8px' }}>
               <div style={{ fontSize: '16px', fontWeight: '600', color: '#1e293b', marginBottom: '8px' }}>
-                {selectedLoadForOffers.origin} â†’ {selectedLoadForOffers.destination}
+                {selectedLoadForOffers.origin || 'N/A'} -> {selectedLoadForOffers.destination || 'N/A'}
               </div>
               <div style={{ fontSize: '14px', color: '#64748b' }}>
                 Equipment: {selectedLoadForOffers.equipment_type || 'N/A'} | 
