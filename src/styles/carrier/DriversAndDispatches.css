@@ -942,6 +942,16 @@
 	color: #94a3b8;
 	font-size: 14px;
 }
+.drivers-dispatches .drivers-controls .search-container .search-icon {
+  position: absolute !important;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 16px !important;
+  height: 16px !important;
+  pointer-events: none;
+  z-index: 2;
+}
 .drivers-search {
 	width: 100%;
 	padding: 10px 12px 10px 36px;
@@ -952,6 +962,8 @@
 	background: #fff;
 	transition: border-color 0.2s;
 	box-sizing: border-box;
+  position: relative;
+  z-index: 1;
 }
 
 .drivers-search:focus {
@@ -1317,6 +1329,70 @@
   border-radius: 8px;
   padding: 40px 20px;
   text-align: center;
+}
+
+/* Live map uses an embedded interactive component; remove placeholder padding */
+.dispatch-board-row .live-tracking-map .map-container {
+  position: relative;
+  padding: 0;
+  text-align: left;
+  overflow: hidden;
+}
+
+.dispatch-board-row .live-tracking-map .map-fullscreen-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 5;
+}
+
+.fp-map-fullscreen-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.98);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+}
+
+.dark-root .fp-map-fullscreen-overlay {
+  background: rgba(17, 24, 39, 0.98);
+}
+
+.fp-map-fullscreen-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.dark-root .fp-map-fullscreen-bar {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.fp-map-fullscreen-title {
+  font-weight: 750;
+  color: #111827;
+}
+
+.dark-root .fp-map-fullscreen-title {
+  color: #e5e7eb;
+}
+
+.fp-map-fullscreen-hint {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.dark-root .fp-map-fullscreen-hint {
+  color: #94a3b8;
+}
+
+.fp-map-fullscreen-body {
+  flex: 1;
+  padding: 0;
 }
 
 .map-placeholder i {

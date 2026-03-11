@@ -67,6 +67,27 @@ export default function Marketplace({ activeSection, setActiveSection }) {
   const [driversLoading, setDriversLoading] = useState(false)
   const [hiringDriver, setHiringDriver] = useState(null)
 
+  // Drivers controls state (wire up all UI elements)
+  const DRIVER_FAVORITES_STORAGE_KEY = 'fp_carrier_marketplace_driver_favorites_v1'
+  const [driverLocationQuery, setDriverLocationQuery] = useState('')
+  const [driverRadius, setDriverRadius] = useState('25')
+  const [driverCdlClassFilter, setDriverCdlClassFilter] = useState('')
+  const [driverStatusFilter, setDriverStatusFilter] = useState('')
+  const [driverComplianceFilter, setDriverComplianceFilter] = useState('')
+  const [driverSort, setDriverSort] = useState('relevance')
+  const [selectedEndorsements, setSelectedEndorsements] = useState(() => new Set())
+  const [expandedDriverId, setExpandedDriverId] = useState(null)
+  const [driverFavorites, setDriverFavorites] = useState(() => {
+    try {
+      const raw = localStorage.getItem(DRIVER_FAVORITES_STORAGE_KEY)
+      const parsed = JSON.parse(raw || '[]')
+      if (Array.isArray(parsed)) return new Set(parsed.map(String))
+    } catch {
+      // ignore
+    }
+    return new Set()
+  })
+
   // Bidding state
   const [bidModalOpen, setBidModalOpen] = useState(false)
   const [detailsModalOpen, setDetailsModalOpen] = useState(false)
@@ -325,12 +346,16 @@ export default function Marketplace({ activeSection, setActiveSection }) {
         const data = await response.json()
         // Format drivers for UI
         const formattedDrivers = (data.drivers || []).map(driver => {
+          const rawCdlClass = String(driver.cdl_class || '').trim().toUpperCase()
+          const rawStatus = String(driver.status || '').trim().toLowerCase()
+
           // Build endorsements array
           const endorsements = []
           if (driver.hazmat_endorsement) endorsements.push('Hazmat')
           if (driver.tanker_endorsement) endorsements.push('Tanker')
           if (driver.doubles_triples) endorsements.push('Double/Triple')
           if (driver.passenger_endorsement) endorsements.push('Passenger')
+          if (driver.school_bus_endorsement) endorsements.push('School Bus')
           if (endorsements.length === 0) endorsements.push('None')
 
           // Build equipment/compliance tags
@@ -339,18 +364,35 @@ export default function Marketplace({ activeSection, setActiveSection }) {
           if (driver.medical_card_verified) equipmentTypes.push('Med Card Active')
           if (driver.drug_test_status === 'passed') equipmentTypes.push('MVR Clean')
 
+          const isCompliant = (
+            equipmentTypes.includes('CDL Valid') &&
+            equipmentTypes.includes('Med Card Active') &&
+            equipmentTypes.includes('MVR Clean')
+          )
+
+          const yearsExpNum = typeof driver.years_experience === 'number'
+            ? driver.years_experience
+            : (driver.years_experience ? Number(driver.years_experience) : null)
+
           return {
             id: driver.id || driver.driver_id,
             name: driver.name || 'Unknown Driver',
             rating: driver.rating || 0,
             trips: driver.total_deliveries || driver.total_loads || 0,
-            class: driver.cdl_class ? `${driver.cdl_class} - ${driver.cdl_state || ''}` : 'N/A',
+            class: rawCdlClass ? `${rawCdlClass} - ${driver.cdl_state || ''}` : 'N/A',
+            cdlClass: rawCdlClass,
+            cdlState: String(driver.cdl_state || '').trim(),
             location: driver.current_location || driver.current_city || 'Unknown',
-            experience: driver.years_experience ? `${driver.years_experience} years` : 'N/A',
+            experience: (yearsExpNum !== null && Number.isFinite(yearsExpNum)) ? `${yearsExpNum} years` : (driver.years_experience ? `${driver.years_experience} years` : 'N/A'),
+            yearsExperience: (yearsExpNum !== null && Number.isFinite(yearsExpNum)) ? yearsExpNum : null,
             endorsements: endorsements,
             safetyScore: driver.safety_score || 0,
             onTime: driver.on_time_rate ? driver.on_time_rate >= 0.95 : false,
-            available: driver.status === 'available',
+            available: rawStatus === 'available',
+            status: rawStatus || '',
+            compliant: isCompliant,
+            email: String(driver.email || driver.contact_email || '').trim(),
+            phone: String(driver.phone || driver.phone_number || '').trim(),
             photo: `https://ui-avatars.com/api/?name=${encodeURIComponent(driver.name || 'Driver')}&background=random`,
             lastActivity: 'Recently active',
             equipmentTypes: equipmentTypes.length > 0 ? equipmentTypes : ['Pending Verification']
@@ -403,6 +445,174 @@ export default function Marketplace({ activeSection, setActiveSection }) {
       fetchMarketplaceDrivers()
     }
   }, [activeTab, currentUser, isMarketplaceReady])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(DRIVER_FAVORITES_STORAGE_KEY, JSON.stringify(Array.from(driverFavorites)))
+    } catch {
+      // ignore
+    }
+  }, [driverFavorites])
+
+  const toggleDriverEndorsement = (label) => {
+    const key = String(label || '').trim()
+    if (!key || key.toLowerCase() === 'none') return
+    setSelectedEndorsements(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  const toggleDriverFavorite = (driverId) => {
+    const id = String(driverId || '').trim()
+    if (!id) return
+    setDriverFavorites(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const exportDriversCsv = (rows) => {
+    const safeRows = Array.isArray(rows) ? rows : []
+    const headers = ['Name', 'Location', 'CDL Class', 'Rating', 'Trips', 'Status', 'Compliance', 'Endorsements', 'Email', 'Phone']
+    const escape = (v) => {
+      const s = String(v ?? '')
+      if (s.includes('"') || s.includes(',') || s.includes('\n')) {
+        return '"' + s.replaceAll('"', '""') + '"'
+      }
+      return s
+    }
+    const lines = [headers.join(',')]
+    for (const d of safeRows) {
+      const endorsements = Array.isArray(d?.endorsements) ? d.endorsements.join(' | ') : ''
+      lines.push([
+        escape(d?.name),
+        escape(d?.location),
+        escape(d?.cdlClass || d?.class),
+        escape(d?.rating),
+        escape(d?.trips),
+        escape(d?.available ? 'Available' : (d?.status ? String(d.status) : '')), 
+        escape(d?.compliant ? 'Compliant' : 'Non-Compliant'),
+        escape(endorsements),
+        escape(d?.email),
+        escape(d?.phone),
+      ].join(','))
+    }
+    const csv = lines.join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `drivers_export_${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  const handlePostDriverRequest = () => {
+    const to = 'help@freightpower-ai.com'
+    const subject = 'Driver Request (Carrier Marketplace)'
+    const body = [
+      'Please help me find drivers that match the following:',
+      '',
+      `Location query: ${driverLocationQuery || 'N/A'}`,
+      `Radius: ${driverRadius || 'N/A'} miles`,
+      `CDL class: ${driverCdlClassFilter || 'Any'}`,
+      `Status: ${driverStatusFilter || 'Any'}`,
+      `Compliance: ${driverComplianceFilter || 'Any'}`,
+      `Endorsements: ${Array.from(selectedEndorsements).join(', ') || 'Any'}`,
+      '',
+      'Notes:',
+      '',
+    ].join('\n')
+    window.location.href = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+  }
+
+  const messageDriver = (driver) => {
+    const email = String(driver?.email || '').trim()
+    const phone = String(driver?.phone || '').trim()
+    if (email) {
+      window.location.href = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent('FreightPower - Driver Opportunity')}`
+      return
+    }
+    if (phone) {
+      window.location.href = `tel:${encodeURIComponent(phone)}`
+      return
+    }
+    alert('No contact info available for this driver.')
+  }
+
+  const endorsementOptions = ['Hazmat', 'Tanker', 'Double/Triple', 'Passenger', 'School Bus']
+
+  const filteredDrivers = drivers
+    .filter(d => {
+      if (!d) return false
+
+      const q = String(driverLocationQuery || '').trim().toLowerCase()
+      if (q) {
+        const radiusMiles = Number.parseInt(String(driverRadius || '25'), 10)
+        const tokens = q.split(/[\s,]+/).filter(Boolean)
+
+        const hay = [d.name, d.location, d.class, d.cdlClass, d.cdlState]
+          .map(x => String(x || '').toLowerCase())
+          .join(' | ')
+
+        // Treat radius as match strictness since we don't have geocoding here.
+        // 25mi => all tokens must match, 50mi => at least half, 100mi => any token.
+        const requiredMatches = tokens.length <= 1
+          ? 1
+          : (radiusMiles <= 25 ? tokens.length : (radiusMiles <= 50 ? Math.ceil(tokens.length / 2) : 1))
+
+        let matchCount = 0
+        for (const t of tokens) {
+          if (hay.includes(t)) matchCount += 1
+        }
+        if (matchCount < requiredMatches) return false
+      }
+
+      if (driverCdlClassFilter) {
+        const cls = String(d?.cdlClass || '').toUpperCase()
+        if (cls !== String(driverCdlClassFilter).toUpperCase()) return false
+      }
+
+      if (driverStatusFilter) {
+        const desired = String(driverStatusFilter).toLowerCase()
+        if (desired === 'available' && !d.available) return false
+        if (desired === 'assigned' && d.available) return false
+        if (desired === 'off_duty' && String(d.status || '').toLowerCase() !== 'off_duty') return false
+      }
+
+      if (driverComplianceFilter) {
+        const desired = String(driverComplianceFilter).toLowerCase()
+        if (desired === 'compliant' && !d.compliant) return false
+        if (desired === 'non_compliant' && d.compliant) return false
+      }
+
+      if (selectedEndorsements.size > 0) {
+        const dEnd = new Set((Array.isArray(d.endorsements) ? d.endorsements : []).map(x => String(x || '').trim()))
+        for (const need of selectedEndorsements) {
+          if (!dEnd.has(need)) return false
+        }
+      }
+
+      return true
+    })
+
+  const sortedDrivers = [...filteredDrivers].sort((a, b) => {
+    const mode = String(driverSort || 'relevance')
+    if (mode === 'rating') return Number(b?.rating || 0) - Number(a?.rating || 0)
+    if (mode === 'experience') return Number(b?.yearsExperience || 0) - Number(a?.yearsExperience || 0)
+    if (mode === 'location') return String(a?.location || '').localeCompare(String(b?.location || ''))
+    // relevance
+    const byRating = Number(b?.rating || 0) - Number(a?.rating || 0)
+    if (byRating) return byRating
+    return Number(b?.trips || 0) - Number(a?.trips || 0)
+  })
 
   // Open bid modal
   const handleOpenBidModal = (load) => {
@@ -1108,43 +1318,59 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                   <input 
                     className="marketplace-filter-input marketplace-location-input" 
                     placeholder="City, State or ZIP"
-                    value=""
-                    onChange={() => {}}
+                    value={driverLocationQuery}
+                    onChange={(e) => setDriverLocationQuery(e.target.value)}
                   />
-                  <select className="marketplace-filter-select marketplace-radius-select">
-                    <option>25 miles</option>
-                    <option>50 miles</option>
-                    <option>100 miles</option>
+                  <select
+                    className="marketplace-filter-select marketplace-radius-select"
+                    value={driverRadius}
+                    onChange={(e) => setDriverRadius(e.target.value)}
+                  >
+                    <option value="25">25 miles</option>
+                    <option value="50">50 miles</option>
+                    <option value="100">100 miles</option>
                   </select>
                 </div>
               </div>
               
               <div className="marketplace-filter-group">
                 <label className="marketplace-filter-label">CDL Class</label>
-                <select className="marketplace-filter-select">
-                  <option>All Classes</option>
-                  <option>CDL Class A</option>
-                  <option>CDL Class B</option>
-                  <option>CDL Class C</option>
+                <select
+                  className="marketplace-filter-select"
+                  value={driverCdlClassFilter}
+                  onChange={(e) => setDriverCdlClassFilter(e.target.value)}
+                >
+                  <option value="">All Classes</option>
+                  <option value="A">CDL Class A</option>
+                  <option value="B">CDL Class B</option>
+                  <option value="C">CDL Class C</option>
                 </select>
               </div>
               
               <div className="marketplace-filter-group">
                 <label className="marketplace-filter-label">Status</label>
-                <select className="marketplace-filter-select">
-                  <option>All Status</option>
-                  <option>Available</option>
-                  <option>Assigned</option>
-                  <option>Off Duty</option>
+                <select
+                  className="marketplace-filter-select"
+                  value={driverStatusFilter}
+                  onChange={(e) => setDriverStatusFilter(e.target.value)}
+                >
+                  <option value="">All Status</option>
+                  <option value="available">Available</option>
+                  <option value="assigned">Assigned</option>
+                  <option value="off_duty">Off Duty</option>
                 </select>
               </div>
               
               <div className="marketplace-filter-group">
                 <label className="marketplace-filter-label">Compliance</label>
-                <select className="marketplace-filter-select">
-                  <option>All</option>
-                  <option>Compliant</option>
-                  <option>Non-Compliant</option>
+                <select
+                  className="marketplace-filter-select"
+                  value={driverComplianceFilter}
+                  onChange={(e) => setDriverComplianceFilter(e.target.value)}
+                >
+                  <option value="">All</option>
+                  <option value="compliant">Compliant</option>
+                  <option value="non_compliant">Non-Compliant</option>
                 </select>
               </div>
             </div>
@@ -1152,35 +1378,40 @@ export default function Marketplace({ activeSection, setActiveSection }) {
             <div className="marketplace-endorsements-row">
               <span className="marketplace-filter-label">Endorsements</span>
               <div className="marketplace-endorsement-chips">
-                <button className="marketplace-endorsement-chip">Hazmat</button>
-                <button className="marketplace-endorsement-chip">Tanker</button>
-                <button className="marketplace-endorsement-chip marketplace-selected">Double/Triple</button>
-                <button className="marketplace-endorsement-chip">Passenger</button>
-                <button className="marketplace-endorsement-chip">School Bus</button>
+                {endorsementOptions.map(opt => (
+                  <button
+                    key={opt}
+                    type="button"
+                    className={`marketplace-endorsement-chip ${selectedEndorsements.has(opt) ? 'marketplace-selected' : ''}`}
+                    onClick={() => toggleDriverEndorsement(opt)}
+                  >
+                    {opt}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
           
           <div className="marketplace-drivers-results-bar">
-            <div className="marketplace-results-count">1,247 drivers found</div>
+            <div className="marketplace-results-count">{sortedDrivers.length.toLocaleString()} driver{sortedDrivers.length === 1 ? '' : 's'} found</div>
             <div className="marketplace-results-controls">
               <div className="marketplace-sort-group">
                 <label>Sort by:</label>
-                <select className="marketplace-sort-select">
-                  <option>Relevance</option>
-                  <option>Rating</option>
-                  <option>Experience</option>
-                  <option>Location</option>
+                <select className="marketplace-sort-select" value={driverSort} onChange={(e) => setDriverSort(e.target.value)}>
+                  <option value="relevance">Relevance</option>
+                  <option value="rating">Rating</option>
+                  <option value="experience">Experience</option>
+                  <option value="location">Location</option>
                 </select>
               </div>
             </div>
           </div>
 
           <div className="drivers-actions">
-          <button className="btn small ghost-cd">
+          <button className="btn small ghost-cd" type="button" onClick={() => exportDriversCsv(sortedDrivers)} disabled={sortedDrivers.length === 0}>
             <i className="fa-solid fa-download"></i> Export
           </button>
-          <button className="btn small-cd">
+          <button className="btn small-cd" type="button" onClick={handlePostDriverRequest}>
             <i className="fa-solid fa-plus"></i> Post Driver Request
           </button>
             </div>
@@ -1195,9 +1426,14 @@ export default function Marketplace({ activeSection, setActiveSection }) {
               <i className="fa-solid fa-users" style={{ fontSize: '48px', marginBottom: '20px', opacity: 0.5 }}></i>
               <p>No available drivers found</p>
             </div>
+          ) : sortedDrivers.length === 0 ? (
+            <div style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
+              <i className="fa-solid fa-filter" style={{ fontSize: '44px', marginBottom: '16px', opacity: 0.5 }}></i>
+              <p>No drivers match your filters</p>
+            </div>
           ) : (
           <div className="marketplace-drivers-list">
-            {drivers.map(driver => (
+            {sortedDrivers.map(driver => (
               <div key={driver.id} className="marketplace-driver-card">
                 <div className="marketplace-driver-header">
                   <div className="marketplace-driver-left">
@@ -1218,7 +1454,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                         <div className="marketplace-detail-item">
                           <span className="marketplace-detail-label">CDL INFO</span>
                           <span className="marketplace-detail-value">Class {driver.class}</span>
-                          <span className="marketplace-detail-sub">Exp: 03/2025</span>
+                          <span className="marketplace-detail-sub">Exp: {driver.experience}</span>
                         </div>
                         
                         <div className="marketplace-detail-item">
@@ -1273,26 +1509,56 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                       {hiringDriver === driver.id ? 'Hiring...' : 'Hire Driver'}
                     </button>
                     <div className="marketplace-driver-menu">
-                      <button className="marketplace-menu-btn" title="View Details">
+                      <button
+                        className="marketplace-menu-btn"
+                        title="View Details"
+                        type="button"
+                        onClick={() => setExpandedDriverId(expandedDriverId === driver.id ? null : driver.id)}
+                      >
                         <i className="fa-solid fa-file-text" />
                       </button>
-                      <button className="marketplace-menu-btn" title="Message">
+                      <button
+                        className="marketplace-menu-btn"
+                        title="Message"
+                        type="button"
+                        onClick={() => messageDriver(driver)}
+                      >
                         <i className="fa-solid fa-message" />
                       </button>
-                      <button className="marketplace-menu-btn" title="Favorite">
-                        <i className="fa-regular fa-heart" />
+                      <button
+                        className="marketplace-menu-btn"
+                        title="Favorite"
+                        type="button"
+                        onClick={() => toggleDriverFavorite(driver.id)}
+                      >
+                        <i className={`${driverFavorites.has(String(driver.id)) ? 'fa-solid' : 'fa-regular'} fa-heart`} />
                       </button>
                     </div>
                   </div>
                 </div>
+
+                {expandedDriverId === driver.id && (
+                  <div style={{ padding: '12px 16px', borderTop: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                      <div style={{ fontWeight: 700 }}>Driver Details</div>
+                      <button className="btn small ghost-cd" type="button" onClick={() => setExpandedDriverId(null)}>Close</button>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                      <div><div style={{ fontSize: 12, color: '#6b7280', fontWeight: 700 }}>Compliance</div><div style={{ fontWeight: 700 }}>{driver.compliant ? 'Compliant' : 'Non-Compliant'}</div></div>
+                      <div><div style={{ fontSize: 12, color: '#6b7280', fontWeight: 700 }}>On-time</div><div style={{ fontWeight: 700 }}>{driver.onTime ? 'High' : 'Normal'}</div></div>
+                      <div><div style={{ fontSize: 12, color: '#6b7280', fontWeight: 700 }}>Email</div><div style={{ fontWeight: 700, wordBreak: 'break-word' }}>{driver.email || 'N/A'}</div></div>
+                      <div><div style={{ fontSize: 12, color: '#6b7280', fontWeight: 700 }}>Phone</div><div style={{ fontWeight: 700 }}>{driver.phone || 'N/A'}</div></div>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
           )}
 
-          {!driversLoading && drivers.length > 0 && (
+          {!driversLoading && sortedDrivers.length > 0 && (
             <div className="drivers-pagination">
-              <span>Showing {drivers.length} driver{drivers.length !== 1 ? 's' : ''}</span>
+              <span>Showing {sortedDrivers.length} driver{sortedDrivers.length !== 1 ? 's' : ''}</span>
             </div>
           )}
         </div>
@@ -1300,7 +1566,8 @@ export default function Marketplace({ activeSection, setActiveSection }) {
 
       {/* Services Content */}
       {activeTab === 'services' && (
-        <div className="services-page">
+        <div className="services-page services-coming-soon-wrapper">
+          <div className="services-coming-soon-content" aria-disabled="true">
           {/* Service Tabs */}
           <div className="services-header">
             <div className="services-tabs">
@@ -1614,6 +1881,11 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                 </div>
               </div>
             )}
+          </div>
+          </div>
+
+          <div className="services-coming-soon-overlay" role="note" aria-label="Coming soon">
+            <div className="services-coming-soon-badge">Coming soon</div>
           </div>
         </div>
       )}

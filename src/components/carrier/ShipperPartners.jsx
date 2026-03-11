@@ -771,6 +771,7 @@ export default function ShipperPartners(){
                     <div className="stat-row"><div className="label">On-time Rate</div><div className="value green">{p.onTime}</div></div>
                     <div className="stat-row"><div className="label">Rating</div><div className="value stars">{Array.from({length:5}).map((_,i)=>(<i key={i} className={`fa-star ${i < Math.round(p.rating) ? 'fa-solid' : 'fa-regular'}`} />))} <span className="rating-num">{p.rating}</span></div></div>
                     <div className="stat-row"><div className="label">Last Load</div><div className="value">{p.lastLoad}</div></div>
+                  </div>
 
                   <div className="divider" />
 
@@ -781,7 +782,7 @@ export default function ShipperPartners(){
 
                   <div className="fav-actions">
                     <button className="btn small-cd" style={{width: '100%'}}>Message</button>
-                  <button className="btn small ghost-cd" style={{width: '100%'}}>Invite</button>
+                    <button className="btn small ghost-cd" style={{width: '100%'}}>Invite</button>
                   </div>
                 </div>
               ))}

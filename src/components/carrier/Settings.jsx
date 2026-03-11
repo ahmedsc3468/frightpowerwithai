@@ -3,6 +3,7 @@ import '../../styles/carrier/Settings.css';
 import { useAuth } from '../../contexts/AuthContext';
 import { useUserSettings } from '../../contexts/UserSettingsContext';
 import { API_URL } from '../../config';
+import { downloadCsv } from '../../utils/fileDownload';
 
 export default function Settings() {
   const { currentUser } = useAuth();
@@ -1212,7 +1213,22 @@ export default function Settings() {
                       <i className="fa-solid fa-file-lines"></i>
                       Security Audit Trail
                     </h4>
-                    <button className="export-btn-small">Export</button>
+                    <button
+                      className="export-btn-small"
+                      type="button"
+                      onClick={() => {
+                        const rows = [
+                          { title: 'MFA enabled for all users', time: '2 hours ago' },
+                          { title: 'Password reset for John Doe', time: '1 day ago' },
+                          { title: 'Login blocked from unknown IP', time: '2 days ago' },
+                          { title: 'Session timeout updated', time: '3 days ago' },
+                          { title: 'Device registered for Sarah Wilson', time: '1 week ago' },
+                        ];
+                        downloadCsv(`security_audit_trail_${new Date().toISOString().slice(0, 10)}.csv`, rows, ['title', 'time']);
+                      }}
+                    >
+                      Export
+                    </button>
                   </div>
 
                   <div className="audit-list">

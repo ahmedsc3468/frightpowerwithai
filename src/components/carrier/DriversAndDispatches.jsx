@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import '../../styles/carrier/DriversAndDispatches.css';
 import { useAuth } from '../../contexts/AuthContext';
 import { API_URL } from '../../config';
 import HereMap from '../common/HereMap';
+import { downloadCsv } from '../../utils/fileDownload';
 
 const DriversAndDispatches = () => {
   const { currentUser } = useAuth();
@@ -14,8 +15,113 @@ const DriversAndDispatches = () => {
   const [drivers, setDrivers] = useState([]);
   const [driversLoading, setDriversLoading] = useState(false);
   const [availableLoads, setAvailableLoads] = useState([]);
+  const [carrierLoads, setCarrierLoads] = useState([]);
   const [loadsLoading, setLoadsLoading] = useState(false);
   const [assigningLoad, setAssigningLoad] = useState(null);
+  const [showAllActivity, setShowAllActivity] = useState(false);
+  const [isMapFullscreen, setIsMapFullscreen] = useState(false);
+  const mapHistoryPushedRef = useRef(false);
+
+  const parseEpochSeconds = (value) => {
+    if (!value) return null
+    if (typeof value === 'number') return value
+    if (typeof value?.seconds === 'number') return value.seconds
+    const s = String(value).trim()
+    if (!s) return null
+    if (/^\d+(\.\d+)?$/.test(s)) {
+      const n = Number(s)
+      return Number.isFinite(n) ? n : null
+    }
+    const d = new Date(s)
+    const ms = d.getTime()
+    if (Number.isNaN(ms)) return null
+    return Math.floor(ms / 1000)
+  }
+
+  const timeAgo = (value) => {
+    const ts = parseEpochSeconds(value)
+    if (!ts) return '—'
+    const deltaSec = Math.max(0, Math.floor(Date.now() / 1000) - ts)
+    if (deltaSec < 60) return `${deltaSec}s ago`
+    const min = Math.floor(deltaSec / 60)
+    if (min < 60) return `${min} min ago`
+    const hr = Math.floor(min / 60)
+    if (hr < 24) return `${hr} hour${hr === 1 ? '' : 's'} ago`
+    const days = Math.floor(hr / 24)
+    return `${days} day${days === 1 ? '' : 's'} ago`
+  }
+
+  const loadIsActive = (load) => {
+    const s = String(load?.status || '').toLowerCase()
+    return s && s !== 'draft' && s !== 'cancelled' && s !== 'delivered' && s !== 'completed'
+  }
+
+  const loadHasNoDriver = (load) => {
+    return !load?.assigned_driver && !load?.assigned_driver_id
+  }
+
+  const loadBestTimestamp = (load) => {
+    return (
+      parseEpochSeconds(load?.updated_at)
+      || parseEpochSeconds(load?.updatedAt)
+      || parseEpochSeconds(load?.created_at)
+      || parseEpochSeconds(load?.createdAt)
+      || 0
+    )
+  }
+
+  const loadScheduledDeliveryTs = (load) => {
+    return (
+      parseEpochSeconds(load?.delivery_date)
+      || parseEpochSeconds(load?.deliveryDate)
+      || null
+    )
+  }
+
+  const loadDeliveredTs = (load) => {
+    return (
+      parseEpochSeconds(load?.delivered_at)
+      || parseEpochSeconds(load?.deliveredAt)
+      || parseEpochSeconds(load?.completed_at)
+      || parseEpochSeconds(load?.completedAt)
+      || null
+    )
+  }
+
+  const driverHosRemainingHours = (rawDriver) => {
+    const candidates = [
+      rawDriver?.hos_hours_remaining,
+      rawDriver?.hos_remaining_hours,
+      rawDriver?.hos_remaining,
+      rawDriver?.hours_remaining_14,
+      rawDriver?.hos_14_remaining,
+    ]
+    for (const c of candidates) {
+      const n = typeof c === 'number' ? c : (c ? Number(c) : null)
+      if (Number.isFinite(n)) return n
+    }
+    return null
+  }
+
+  const driverLastUpdatedTs = (rawDriver) => {
+    const candidates = [
+      rawDriver?.updated_at,
+      rawDriver?.updatedAt,
+      rawDriver?.last_updated_at,
+      rawDriver?.lastUpdatedAt,
+      rawDriver?.location_updated_at,
+      rawDriver?.locationUpdatedAt,
+      rawDriver?.last_location_at,
+      rawDriver?.lastLocationAt,
+      rawDriver?.created_at,
+      rawDriver?.createdAt,
+    ]
+    for (const c of candidates) {
+      const ts = parseEpochSeconds(c)
+      if (typeof ts === 'number' && ts > 0) return ts
+    }
+    return null
+  }
 
   // Fetch hired drivers
   const fetchMyDrivers = async () => {
@@ -33,11 +139,8 @@ const DriversAndDispatches = () => {
 
       if (response.ok) {
         const data = await response.json();
-        // Filter only available drivers (is_available = true)
-        const availableDrivers = (data.drivers || []).filter(driver => driver.is_available === true);
-        
         // Format drivers for UI
-        const formattedDrivers = availableDrivers.map(driver => {
+        const formattedDrivers = (data.drivers || []).map(driver => {
           // Build endorsements string
           const endorsementsList = []
           if (driver.hazmat_endorsement) endorsementsList.push('HazMat')
@@ -64,7 +167,9 @@ const DriversAndDispatches = () => {
             location: driver.current_location || driver.current_city || 'Unknown',
             avatar: (driver.name || 'Driver').split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2),
             // Driver is only "Assigned" when on_trip/in_transit. Otherwise they're available for new loads
-            status: driver.status === 'on_trip' || driver.status === 'in_transit' ? 'Assigned' : 'Available',
+            status: driver.status === 'in_transit' ? 'In Transit'
+              : (driver.status === 'on_trip' ? 'Assigned'
+              : (driver.status === 'off_duty' || driver.status === 'unavailable' ? 'Rest' : 'Available')),
             cdlClass: driver.cdl_class || 'N/A',
             endorsements: endorsements,
             medicalCard: medicalCard,
@@ -73,6 +178,10 @@ const DriversAndDispatches = () => {
             assignLoad: driver.status !== 'on_trip' && driver.status !== 'in_transit',
             onRoute: driver.status === 'on_trip' || driver.status === 'in_transit',
             offDuty: driver.status === 'off_duty' || driver.status === 'unavailable'
+            ,
+            hosRemainingHours: driverHosRemainingHours(driver),
+            lastUpdatedTs: driverLastUpdatedTs(driver),
+            rawStatus: driver.status,
           }
         })
         setDrivers(formattedDrivers)
@@ -85,8 +194,8 @@ const DriversAndDispatches = () => {
     }
   }
 
-  // Fetch available loads for assignment
-  const fetchAvailableLoads = async () => {
+  // Fetch carrier-visible loads
+  const fetchCarrierLoads = async () => {
     if (!currentUser) return;
 
     setLoadsLoading(true);
@@ -101,50 +210,22 @@ const DriversAndDispatches = () => {
 
       if (response.ok) {
         const data = await response.json();
-        console.log('📦 Total loads fetched:', data.loads?.length || 0);
-        console.log('📦 Current carrier ID:', currentUser.uid);
+
+        const allLoads = Array.isArray(data.loads) ? data.loads : []
+        setCarrierLoads(allLoads)
         
         // IMPORTANT:
         // The backend `/loads` endpoint is already role-filtered for carriers
         // (created_by=carrier OR assigned_carrier=carrier). So the Dispatch Board
         // should treat the returned loads as "carrier-visible" and only filter
         // by driver assignment + active status.
-        const unassignedLoads = (data.loads || []).filter(load => {
-          // Check if load has NO driver assigned
-          const hasNoDriver = !load.assigned_driver && !load.assigned_driver_id;
-          
-          // Exclude drafts, cancelled, delivered, or completed loads
-          const isActiveLoad = load.status !== 'draft' && 
-                              load.status !== 'cancelled' && 
-                              load.status !== 'delivered' && 
-                              load.status !== 'completed';
-          
-          const shouldShow = hasNoDriver && isActiveLoad;
-          
-          // Log ALL loads with detailed info to debug
-          console.log(`📋 Load ${load.load_id || load.id}:`, {
-            created_by: load.created_by,
-            assigned_carrier: load.assigned_carrier,
-            assigned_carrier_id: load.assigned_carrier_id,
-            carrier_id: load.carrier_id,
-            status: load.status,
-            assigned_driver: load.assigned_driver,
-            assigned_driver_id: load.assigned_driver_id,
-            hasNoDriver,
-            isActiveLoad,
-            '✅ WILL SHOW': shouldShow,
-            'FULL_LOAD': load // Log complete load object to see all fields
-          });
-          
-          return shouldShow;
-        });
-        
-        console.log('✅ Unassigned loads available for driver assignment:', unassignedLoads.length, unassignedLoads);
+        const unassignedLoads = allLoads.filter(load => loadHasNoDriver(load) && loadIsActive(load));
         setAvailableLoads(unassignedLoads);
       }
     } catch (error) {
       console.error('Error fetching loads:', error)
       setAvailableLoads([])
+      setCarrierLoads([])
     } finally {
       setLoadsLoading(false)
     }
@@ -186,9 +267,159 @@ const DriversAndDispatches = () => {
   useEffect(() => {
     fetchMyDrivers()
     if (activeTab === 'dispatch') {
-      fetchAvailableLoads()
+      fetchCarrierLoads()
     }
   }, [currentUser, activeTab])
+
+  const driversById = new Map(drivers.map(d => [String(d.id), d]))
+  const activeLoads = carrierLoads.filter(loadIsActive)
+  const pendingAssignmentLoads = activeLoads.filter(loadHasNoDriver)
+
+  // Best-effort on-time rate based on delivered timestamp <= scheduled delivery.
+  const deliveredLoads = carrierLoads.filter(l => {
+    const s = String(l?.status || '').toLowerCase()
+    return s === 'delivered' || s === 'completed'
+  })
+  const onTimeStats = deliveredLoads.reduce((acc, l) => {
+    const scheduled = loadScheduledDeliveryTs(l)
+    const delivered = loadDeliveredTs(l)
+    if (!scheduled || !delivered) return acc
+    acc.total += 1
+    if (delivered <= scheduled) acc.onTime += 1
+    return acc
+  }, { total: 0, onTime: 0 })
+  const onTimeRatePct = onTimeStats.total > 0 ? Math.round((onTimeStats.onTime / onTimeStats.total) * 100) : null
+
+  const exceptions = (() => {
+    const items = []
+
+    // HOS alerts (if we have HOS data)
+    const hosDrivers = drivers
+      .map(d => ({ d, hos: typeof d.hosRemainingHours === 'number' ? d.hosRemainingHours : null }))
+      .filter(x => typeof x.hos === 'number')
+      .sort((a, b) => a.hos - b.hos)
+
+    for (const { d, hos } of hosDrivers) {
+      if (hos > 2) continue
+      const relatedLoad = carrierLoads.find(l => String(l?.assigned_driver_id || l?.assigned_driver || '') === String(d.id))
+      const loadLabel = relatedLoad?.load_id || relatedLoad?.id
+      items.push({
+        id: `hos:${d.id}`,
+        tone: 'red',
+        icon: 'fa-triangle-exclamation',
+        title: 'HOS Alert',
+        time: timeAgo(d.lastUpdatedTs),
+        desc: `${d.name} has ~${hos.toFixed(1)}h HOS remaining${loadLabel ? ` on Load #${String(loadLabel).slice(0, 8)}` : ''}`,
+        primary: { label: 'Force Rest', onClick: () => alert('Force Rest is not yet automated. Please contact the driver.') },
+        secondary: { label: 'Reassign Load', onClick: () => alert('Use Load Assignment & Control to reassign.') },
+      })
+      break
+    }
+
+    // Detention alerts (if load flags exist)
+    const detentionLoad = carrierLoads
+      .filter(l => Boolean(l?.detention_reported || l?.detention || l?.detention_hours || l?.detention_minutes))
+      .sort((a, b) => loadBestTimestamp(b) - loadBestTimestamp(a))[0]
+    if (detentionLoad) {
+      const loadLabel = detentionLoad?.load_id || detentionLoad?.id
+      const driverId = detentionLoad?.assigned_driver_id || detentionLoad?.assigned_driver
+      const driverName = driverId ? (driversById.get(String(driverId))?.name || 'A driver') : 'A driver'
+      items.push({
+        id: `detention:${String(loadLabel)}`,
+        tone: 'yellow',
+        icon: 'fa-triangle-exclamation',
+        title: 'Detention Report',
+        time: timeAgo(loadBestTimestamp(detentionLoad)),
+        desc: `${driverName} reported detention on Load #${String(loadLabel).slice(0, 8)}`,
+        primary: { label: 'Log Detention', onClick: () => alert('Detention logging is not yet wired. (Coming soon)') },
+        secondary: { label: 'Contact Customer', onClick: () => alert('Customer contact is not yet wired. (Coming soon)') },
+      })
+    }
+
+    // Pending assignment risk: pickup soon without driver
+    const nowSec = Math.floor(Date.now() / 1000)
+    const atRisk = pendingAssignmentLoads
+      .map(l => ({ l, pickup: parseEpochSeconds(l?.pickup_date || l?.pickupDate) }))
+      .filter(x => x.pickup && x.pickup > 0)
+      .sort((a, b) => a.pickup - b.pickup)
+      .find(x => (x.pickup - nowSec) <= (24 * 3600))
+
+    if (atRisk) {
+      const loadLabel = atRisk.l?.load_id || atRisk.l?.id
+      items.push({
+        id: `risk:${String(loadLabel)}`,
+        tone: 'blue',
+        icon: 'fa-screwdriver-wrench',
+        title: 'Assignment Risk',
+        time: timeAgo(loadBestTimestamp(atRisk.l)),
+        desc: `Load #${String(loadLabel).slice(0, 8)} pickups soon but has no driver assigned`,
+        primary: { label: 'Quick Assign', onClick: () => window.scrollTo({ top: 0, behavior: 'smooth' }) },
+        secondary: { label: 'View Details', onClick: () => alert('Load details from Dispatch Board is coming soon.') },
+      })
+    }
+
+    return items.slice(0, 3)
+  })()
+
+  const activityItems = (() => {
+    const rows = []
+
+    for (const l of carrierLoads) {
+      const loadId = l?.load_id || l?.id
+      const ts = loadBestTimestamp(l)
+      const status = String(l?.status || '').toLowerCase()
+      const driverId = l?.assigned_driver_id || l?.assigned_driver
+      const driverName = driverId ? (driversById.get(String(driverId))?.name || 'Driver') : null
+
+      if (driverName && loadId && loadIsActive(l) && !loadHasNoDriver(l)) {
+        rows.push({
+          id: `assign:${String(loadId)}:${String(driverId)}`,
+          kind: 'check',
+          icon: 'fa-check-circle',
+          text: (<><span style={{ fontWeight: 600 }}>{driverName}</span> assigned to Load <span style={{ textDecoration: 'underline' }}>#{String(loadId).slice(0, 8)}</span></>),
+          meta: `${timeAgo(ts)} by System`,
+          ts,
+        })
+      }
+
+      if (loadId && (status === 'delivered' || status === 'completed')) {
+        rows.push({
+          id: `delivered:${String(loadId)}`,
+          kind: 'location',
+          icon: 'fa-map-marker-alt',
+          text: (<>Load <span style={{ textDecoration: 'underline' }}>#{String(loadId).slice(0, 8)}</span> marked {status === 'completed' ? 'completed' : 'delivered'}</>),
+          meta: timeAgo(ts),
+          ts,
+        })
+      }
+
+      if (loadId && (l?.detention_reported || l?.detention || l?.detention_hours || l?.detention_minutes)) {
+        rows.push({
+          id: `detention:${String(loadId)}`,
+          kind: 'warning',
+          icon: 'fa-exclamation-circle',
+          text: (<>Detention reported on Load <span style={{ textDecoration: 'underline' }}>#{String(loadId).slice(0, 8)}</span></>),
+          meta: timeAgo(ts),
+          ts,
+        })
+      }
+    }
+
+    // Also add an alert if there are pending assignments.
+    if (pendingAssignmentLoads.length > 0) {
+      rows.push({
+        id: 'pending-assignments',
+        kind: 'alert',
+        icon: 'fa-exclamation-triangle',
+        text: (<>There are <span style={{ fontWeight: 600 }}>{pendingAssignmentLoads.length}</span> active load(s) pending assignment</>),
+        meta: 'Now',
+        ts: Math.floor(Date.now() / 1000),
+      })
+    }
+
+    rows.sort((a, b) => (b.ts || 0) - (a.ts || 0))
+    return showAllActivity ? rows : rows.slice(0, 5)
+  })()
 
   const filteredDrivers = drivers.filter(driver => {
     const matchesSearch = driver.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -199,6 +430,91 @@ const DriversAndDispatches = () => {
     
     return matchesSearch && matchesCdl && matchesAvailability && matchesLocation;
   });
+
+  const handleExportDrivers = () => {
+    const rows = (Array.isArray(filteredDrivers) ? filteredDrivers : []).map(d => ({
+      id: d?.id,
+      name: d?.name,
+      status: d?.status,
+      location: d?.location,
+      cdl_class: d?.cdlClass,
+      endorsements: d?.endorsements,
+      equipment: d?.equipment,
+      medical_card: d?.medicalCard,
+      insurance: d?.insurance,
+      compliance: d?.compliance,
+      hos_remaining_hours: typeof d?.hosRemainingHours === 'number' ? d.hosRemainingHours : null,
+      last_updated: typeof d?.lastUpdatedTs === 'number' ? d.lastUpdatedTs : null,
+    }));
+
+    downloadCsv(
+      `carrier_driver_directory_${new Date().toISOString().slice(0, 10)}.csv`,
+      rows,
+      ['id', 'name', 'status', 'location', 'cdl_class', 'endorsements', 'equipment', 'medical_card', 'insurance', 'compliance', 'hos_remaining_hours', 'last_updated']
+    );
+  };
+
+  const trackingMarkers = [
+    // Example markers - in production, these would come from real GPS data
+    { lat: 40.7128, lng: -74.0060, label: 'Driver 1', icon: 'https://cdn-icons-png.flaticon.com/512/684/684908.png' },
+    { lat: 34.0522, lng: -118.2437, label: 'Driver 2', icon: 'https://cdn-icons-png.flaticon.com/512/684/684908.png' },
+    { lat: 41.8781, lng: -87.6298, label: 'Driver 3', icon: 'https://cdn-icons-png.flaticon.com/512/684/684908.png' }
+  ];
+
+  const openMapFullscreen = () => {
+    setIsMapFullscreen(true);
+    try {
+      // Push a history state so browser back exits fullscreen.
+      window.history.pushState({ fp_map_fullscreen: true }, document.title);
+      mapHistoryPushedRef.current = true;
+    } catch {
+      // ignore
+    }
+  };
+
+  const closeMapFullscreen = () => {
+    // If we pushed a history entry, use back so the user can navigate intuitively.
+    if (mapHistoryPushedRef.current) {
+      try {
+        window.history.back();
+        return;
+      } catch {
+        // fall through
+      }
+    }
+    setIsMapFullscreen(false);
+    mapHistoryPushedRef.current = false;
+  };
+
+  useEffect(() => {
+    if (!isMapFullscreen) return;
+
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeMapFullscreen();
+      }
+    };
+
+    const onPopState = (e) => {
+      // Back navigation should exit fullscreen.
+      setIsMapFullscreen(false);
+      mapHistoryPushedRef.current = false;
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('popstate', onPopState);
+
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('popstate', onPopState);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMapFullscreen]);
 
   return (
     <div className="drivers-dispatches">
@@ -213,7 +529,7 @@ const DriversAndDispatches = () => {
             <i className="fas fa-plus"></i>
             Add Driver
           </button>
-          <button className="btn small ghost-cd">
+          <button className="btn small ghost-cd" type="button" onClick={handleExportDrivers} disabled={filteredDrivers.length === 0}>
             <i className="fas fa-download"></i>
             Export
           </button>
@@ -395,8 +711,8 @@ const DriversAndDispatches = () => {
               <div className="driver-status-filters">
                 <span className="status-chip available">Available ({drivers.filter(d => d.status === 'Available').length})</span>
                 <span className="status-chip assigned">Assigned ({drivers.filter(d => d.status === 'Assigned').length})</span>
-                <span className="status-chip in-transit">In Transit ({drivers.filter(d => d.status === 'On Route').length})</span>
-                <span className="status-chip rest">Rest ({drivers.filter(d => d.status === 'Off Duty').length})</span>
+                <span className="status-chip in-transit">In Transit ({drivers.filter(d => d.status === 'In Transit').length})</span>
+                <span className="status-chip rest">Rest ({drivers.filter(d => d.status === 'Rest').length})</span>
               </div>
               {driversLoading ? (
                 <div style={{ padding: '40px', textAlign: 'center' }}>
@@ -428,7 +744,7 @@ const DriversAndDispatches = () => {
                   </div>
                   <div className="driver-row"><span className="driver-label">Status:</span><span className={`driver-status ${driver.status.toLowerCase().replace(' ', '-')}`}>{driver.status}</span></div>
                   <div className="driver-row"><span className="driver-label">Location:</span><span className="driver-value">{driver.location}</span></div>
-                  <div className="driver-row"><span className="driver-label">HOS Left:</span><span className="driver-value">-</span></div>
+                  <div className="driver-row"><span className="driver-label">HOS Left:</span><span className="driver-value">{typeof driver.hosRemainingHours === 'number' ? `${driver.hosRemainingHours.toFixed(1)}h` : 'N/A'}</span></div>
                   <div className="driver-row"><span className="driver-label">Truck:</span><span className="driver-value">{driver.equipment}</span></div>
                 </div>
                 ))}
@@ -439,7 +755,7 @@ const DriversAndDispatches = () => {
             <div className="live-tracking-map">
               <div className="live-tracking-header" style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'12px'}}>
                 <h3 style={{margin:0}}>Live Tracking Map</h3>
-                <button className="btn small ghost-cd"><i className="fas fa-expand"></i> Fullscreen</button>
+                <div />
               </div>
               <div className="map-legend">
                   <span><span className="legend-dot available"></span>Available</span>
@@ -448,22 +764,47 @@ const DriversAndDispatches = () => {
                   <span><span className="legend-dot rest"></span>Rest/Exception</span>
                 </div>
               <div className="map-container">
+                <button className="btn small ghost-cd map-fullscreen-btn" type="button" onClick={openMapFullscreen}>
+                  <i className="fas fa-expand"></i> Fullscreen
+                </button>
                 <HereMap
                   containerId="drivers-tracking-map"
                   center={{ lat: 39.8283, lng: -98.5795 }} // Center of USA
                   zoom={4}
-                  markers={[
-                    // Example markers - in production, these would come from real GPS data
-                    { lat: 40.7128, lng: -74.0060, label: 'Driver 1', icon: 'https://cdn-icons-png.flaticon.com/512/684/684908.png' },
-                    { lat: 34.0522, lng: -118.2437, label: 'Driver 2', icon: 'https://cdn-icons-png.flaticon.com/512/684/684908.png' },
-                    { lat: 41.8781, lng: -87.6298, label: 'Driver 3', icon: 'https://cdn-icons-png.flaticon.com/512/684/684908.png' }
-                  ]}
+                  markers={trackingMarkers}
                   height="500px"
                   width="100%"
                 />
               </div>
             </div>
           </div>
+
+          {isMapFullscreen && (
+            <div className="fp-map-fullscreen-overlay" role="dialog" aria-modal="true" aria-label="Live Tracking Map Fullscreen">
+              <div className="fp-map-fullscreen-bar">
+                <button className="btn small ghost-cd" type="button" onClick={closeMapFullscreen}>
+                  <i className="fas fa-arrow-left"></i> Back
+                </button>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                  <div className="fp-map-fullscreen-title">Live Tracking Map</div>
+                  <div className="fp-map-fullscreen-hint">Press Esc to exit</div>
+                </div>
+                <button className="btn small ghost-cd" type="button" onClick={closeMapFullscreen}>
+                  <i className="fas fa-compress"></i> Exit
+                </button>
+              </div>
+              <div className="fp-map-fullscreen-body">
+                <HereMap
+                  containerId="drivers-tracking-map-fullscreen"
+                  center={{ lat: 39.8283, lng: -98.5795 }}
+                  zoom={4}
+                  markers={trackingMarkers}
+                  height="calc(100vh - 64px)"
+                  width="100%"
+                />
+              </div>
+            </div>
+          )}
 
           {/* Load Assignment & Control */}
           <div className="dispatch-section load-assignment">
@@ -549,36 +890,24 @@ const DriversAndDispatches = () => {
                   </div>
                   <div className="exception-handling-col">
                     <div className="exception-handling-title">Exception Handling</div>
-                    <div className="exception-card red">
-                      <div className="exception-card-header">
-                        <span className="exception-icon"><i className="fas fa-triangle-exclamation" ></i></span> <span>HOS Violation Alert</span> <span className="exception-time">2 min ago</span>
-                      </div>
-                      <div className="exception-desc">Robert Johnson approaching 14-hour limit on Load #LD-5021</div>
-                      <div className="exception-actions">
-                        <button className="btn small-cd">Force Rest</button>
-                        <button className="btn small ghost-cd">Reassign Load</button>
-                      </div>
-                    </div>
-                    <div className="exception-card yellow">
-                      <div className="exception-card-header">
-                        <span className="exception-icon"><i className="fas fa-triangle-exclamation" ></i></span> <span >Detention Report</span> <span className="exception-time">15 min ago</span>
-                      </div>
-                      <div className="exception-desc">James Wilson delayed 3+ hours at delivery - Load #LD-4892</div>
-                      <div className="exception-actions">
-                        <button className="btn small-cd">Log Detention</button>
-                        <button className="btn small ghost-cd">Contact Customer</button>
-                      </div>
-                    </div>
-                    <div className="exception-card blue">
-                      <div className="exception-card-header">
-                        <span className="exception-icon"><i className="fas fa-screwdriver-wrench"></i></span> <span>Maintenance Alert</span> <span className="exception-time">1 hour ago</span>
-                      </div>
-                      <div className="exception-desc">Truck TX-2847 due for inspection in 500 miles</div>
-                      <div className="exception-actions">
-                        <button className="btn small-cd">Schedule Service</button>
-                        <button className="btn small ghost-cd">View Details</button>
-                      </div>
-                    </div>
+                    {exceptions.length === 0 ? (
+                      <div style={{ padding: '20px', color: '#666' }}>No active exceptions.</div>
+                    ) : (
+                      exceptions.map(ex => (
+                        <div key={ex.id} className={`exception-card ${ex.tone}`}>
+                          <div className="exception-card-header">
+                            <span className="exception-icon"><i className={`fas ${ex.icon}`}></i></span>
+                            <span>{ex.title}</span>
+                            <span className="exception-time">{ex.time}</span>
+                          </div>
+                          <div className="exception-desc">{ex.desc}</div>
+                          <div className="exception-actions">
+                            <button className="btn small-cd" type="button" onClick={ex.primary.onClick}>{ex.primary.label}</button>
+                            <button className="btn small ghost-cd" type="button" onClick={ex.secondary.onClick}>{ex.secondary.label}</button>
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
               </div>
@@ -591,19 +920,19 @@ const DriversAndDispatches = () => {
             <div className="dispatch-stat-card">
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',width:'100%'}}>
                 <div>
-                  <div className="dispatch-stat-num">24</div>
+                  <div className="dispatch-stat-num">{drivers.length}</div>
                   <div className="dispatch-stat-label">Active Drivers</div>
                 </div>
                 <div className="dispatch-stat-icon green">
                   <i className="fas fa-users"></i>
                 </div>
               </div>
-              <div className="dispatch-stat-sub green"><i className="fas fa-arrow-up" style={{marginRight:'4px'}}></i>+2 from yesterday</div>
+              <div className="dispatch-stat-sub green">Hired drivers in your fleet</div>
             </div>
             <div className="dispatch-stat-card">
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',width:'100%'}}>
                 <div>
-                  <div className="dispatch-stat-num">8</div>
+                  <div className="dispatch-stat-num">{drivers.filter(d => d.status === 'Available').length}</div>
                   <div className="dispatch-stat-label">Available</div>
                 </div>
                 <div className="dispatch-stat-icon blue">
@@ -615,101 +944,61 @@ const DriversAndDispatches = () => {
             <div className="dispatch-stat-card">
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',width:'100%'}}>
                 <div>
-                  <div className="dispatch-stat-num">15</div>
+                  <div className="dispatch-stat-num">{activeLoads.length}</div>
                   <div className="dispatch-stat-label">Active Loads</div>
                 </div>
                 <div className="dispatch-stat-icon purple">
                   <i className="fas fa-box"></i>
                 </div>
               </div>
-              <div className="dispatch-stat-sub purple">3 pending assignment</div>
+              <div className="dispatch-stat-sub purple">{pendingAssignmentLoads.length} pending assignment</div>
             </div>
             <div className="dispatch-stat-card">
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',width:'100%'}}>
                 <div>
-                  <div className="dispatch-stat-num">96%</div>
+                  <div className="dispatch-stat-num">{onTimeRatePct === null ? '—' : `${onTimeRatePct}%`}</div>
                   <div className="dispatch-stat-label">On-Time Rate</div>
                 </div>
                 <div className="dispatch-stat-icon green">
                   <i className="fas fa-clock"></i>
                 </div>
               </div>
-              <div className="dispatch-stat-sub green"><i className="fas fa-arrow-up" style={{marginRight:'4px'}}></i>+2.5% this week</div>
+              <div className="dispatch-stat-sub green">Based on delivered/completed loads with timestamps</div>
             </div>
             <div className="dispatch-stat-card">
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',width:'100%'}}>
                 <div>
-                  <div className="dispatch-stat-num">3</div>
+                  <div className="dispatch-stat-num">{exceptions.length}</div>
                   <div className="dispatch-stat-label">Active Alerts</div>
                 </div>
                 <div className="dispatch-stat-icon red">
                   <i className="fas fa-triangle-exclamation"></i>
                 </div>
               </div>
-              <div className="dispatch-stat-sub red">1 critical, 2 warnings</div>
+              <div className="dispatch-stat-sub red">Derived from driver/load signals</div>
             </div>
           </div>
           <div className="dispatch-section recent-activity">
             <h3>
               Recent Dispatch Activity
-              <button className="btn-view-all">View All Activity</button>
+              <button className="btn-view-all" type="button" onClick={() => setShowAllActivity(v => !v)}>{showAllActivity ? 'Show Less' : 'View All Activity'}</button>
             </h3>
             <div className="activity-list">
-              <div className="dispatch-activity-item">
-                <span className="activity-icon check">
-                  <i className="fas fa-check-circle"></i>
-                </span>
-                <div className="activity-content">
-                    <div>
-                      <span style={{fontWeight:600}}>Mike Rodriguez</span> assigned to Load <a href="#" style={{textDecoration:'underline'}}>#LD-7834</a>
+              {activityItems.length === 0 ? (
+                <div style={{ padding: '16px', color: '#666' }}>No activity to show.</div>
+              ) : (
+                activityItems.map(a => (
+                  <div className="dispatch-activity-item" key={a.id}>
+                    <span className={`activity-icon ${a.kind}`}>
+                      <i className={`fas ${a.icon}`}></i>
+                    </span>
+                    <div className="activity-content">
+                      <div>{a.text}</div>
+                      <div className="activity-meta">{a.meta}</div>
                     </div>
-                    <div className="activity-meta">2 minutes ago by John Mitchell</div>
-                </div>
-              </div>
-              <div className="dispatch-activity-item">
-                <span className="activity-icon warning">
-                  <i className="fas fa-exclamation-circle"></i>
-                </span>
-                <div className="activity-content">
-                    <div>
-                      <span style={{fontWeight:600}}>James Wilson</span> reported detention at pickup location
-                    </div>
-                    <div className="activity-meta">15 minutes ago</div>
-                </div>
-              </div>
-              <div className="dispatch-activity-item">
-                <span className="activity-icon exchange">
-                  <i className="fas fa-exchange-alt"></i>
-                </span>
-                <div className="activity-content">
-                    <div>
-                      Load <a href="#" style={{textDecoration:'underline'}}>#LD-4892</a> reassigned from <span style={{fontWeight:600}}>David Thompson</span> to <span style={{fontWeight:600}}>Sarah Chen</span>
-                    </div>
-                    <div className="activity-meta">1 hour ago by John Mitchell</div>
-                </div>
-              </div>
-              <div className="dispatch-activity-item">
-                <span className="activity-icon alert">
-                  <i className="fas fa-exclamation-triangle"></i>
-                </span>
-                <div className="activity-content">
-                    <div>
-                      <span style={{fontWeight:600}}>Robert Johnson</span> approaching HOS limit - automatic rest period initiated
-                    </div>
-                    <div className="activity-meta">2 hours ago</div>
-                </div>
-              </div>
-              <div className="dispatch-activity-item">
-                <span className="activity-icon location">
-                  <i className="fas fa-map-marker-alt"></i>
-                </span>
-                <div className="activity-content">
-                    <div>
-                      <span style={{fontWeight:600}}>Sarah Chen</span> completed delivery for Load <a href="#" style={{textDecoration:'underline'}}>#LD-7801</a>
-                    </div>
-                    <div className="activity-meta">3 hours ago</div>
-                </div>
-              </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>

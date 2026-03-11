@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import '../../styles/carrier/ConsentESignature.css';
+import { downloadCsv, downloadJson } from '../../utils/fileDownload';
 
 export default function ConsentESignature() {
   const [activeTab, setActiveTab] = useState('active-signatures');
@@ -101,8 +102,6 @@ export default function ConsentESignature() {
     }
   ];
 
-  const categories = ['All Categories', 'HR', 'Safety', 'Legal', 'Compliance'];
-
   // Statistics data
   const signatureStats = {
     pending: 24,
@@ -153,50 +152,140 @@ export default function ConsentESignature() {
       size: '5.2 MB',
       recipients: [
         { name: 'Lisa Martinez', status: 'Pending', avatar: 'LM' },
-        { name: 'David Brown', status: 'Pending', avatar: 'DB' }
-      ],
-      moreRecipients: 3,
-      initiator: 'Emily Johnson',
-      dateSent: 'Jan 14, 2025',
-      dueDate: 'Jan 28, 2025',
-      status: 'Pending',
-      statusColor: 'orange',
-      icon: 'fa-book',
-      iconColor: 'orange'
-    },
-    {
-      id: 4,
-      name: 'Carrier Onboarding Packet',
-      type: 'PDF',
-      size: '3.1 MB',
-      recipients: [
-        { name: 'Amanda White', status: 'Signed', avatar: 'AW' }
+        { name: 'David Thompson', status: 'Pending', avatar: 'DT' },
+        { name: 'Emily Brown', status: 'Pending', avatar: 'EB' }
       ],
       initiator: 'John Carter',
       dateSent: 'Jan 10, 2025',
       dueDate: 'Jan 17, 2025',
-      status: 'Signed',
-      statusColor: 'green',
-      icon: 'fa-clipboard-check',
+      status: 'Pending',
+      statusColor: 'orange',
+      icon: 'fa-shield-alt',
       iconColor: 'green'
     },
     {
-      id: 5,
-      name: 'Bill of Lading - Load #2458',
+      id: 4,
+      name: 'Equipment Inspection Form',
       type: 'PDF',
       size: '1.2 MB',
       recipients: [
-        { name: 'Mike Johnson', status: 'Pending', avatar: 'MJ' }
+        { name: 'Kevin White', status: 'Signed', avatar: 'KW' }
       ],
-      initiator: 'Emily Johnson',
-      dateSent: 'Jan 16, 2025',
-      dueDate: 'Jan 18, 2025',
-      status: 'Overdue',
-      statusColor: 'red',
-      icon: 'fa-file-alt',
+      initiator: 'John Carter',
+      dateSent: 'Jan 8, 2025',
+      dueDate: 'Jan 15, 2025',
+      status: 'Completed',
+      statusColor: 'green',
+      icon: 'fa-clipboard-check',
       iconColor: 'blue'
     }
   ];
+
+  const categories = ['All Categories', 'HR', 'Safety', 'Legal', 'Compliance'];
+
+  const archivedDocuments = useMemo(() => ([
+    {
+      document_title: 'Carrier Safety Packet v2.1',
+      document_meta: 'Contract #CSP-2024-001',
+      recipients: 'John Smith (+2 others)',
+      date_completed: 'Dec 15, 2024 2:34 PM',
+      retention_tag: '3-Year Storage',
+      status: 'Signed & Archived',
+    },
+    {
+      document_title: 'Master Service Agreement',
+      document_meta: 'Contract #MSA-2024-089',
+      recipients: 'Sarah Johnson',
+      date_completed: 'Dec 14, 2024 11:22 AM',
+      retention_tag: 'Permanent',
+      status: 'Signed & Archived',
+    },
+    {
+      document_title: 'Bill of Lading #BOL-789456',
+      document_meta: 'Load #FP-2024-3421',
+      recipients: 'Mike Davis (+1 other)',
+      date_completed: 'Dec 13, 2024 4:15 PM',
+      retention_tag: '5-Year Storage',
+      status: 'Signed & Archived',
+    },
+    {
+      document_title: 'Non-Disclosure Agreement',
+      document_meta: 'NDA-2024-156',
+      recipients: 'Lisa Chen',
+      date_completed: 'Dec 12, 2024 9:45 AM',
+      retention_tag: '3-Year Storage',
+      status: 'Signed & Archived',
+    },
+    {
+      document_title: 'Proof of Delivery #POD-321987',
+      document_meta: 'Load #FP-2024-3420',
+      recipients: 'Robert Wilson (+2 others)',
+      date_completed: 'Dec 11, 2024 6:30 PM',
+      retention_tag: '5-Year Storage',
+      status: 'Signed & Archived',
+    },
+  ]), []);
+
+  const filteredActiveDocuments = useMemo(() => {
+    const q = String(documentSearch || '').trim().toLowerCase();
+    return activeDocuments.filter((d) => {
+      const hay = [
+        d?.name,
+        d?.initiator,
+        Array.isArray(d?.recipients) ? d.recipients.map(r => r?.name).join(' ') : '',
+        d?.status,
+        d?.type,
+        d?.dateSent,
+        d?.dueDate,
+      ].map(x => String(x || '').toLowerCase()).join(' | ');
+
+      if (q && !hay.includes(q)) return false;
+      if (statusFilter !== 'All Status' && String(d?.status || '') !== statusFilter) return false;
+      if (documentTypeFilter !== 'All Document Types' && String(d?.type || '') !== documentTypeFilter) return false;
+      if (dateFilter && !String(d?.dateSent || '').includes(dateFilter) && !String(d?.dueDate || '').includes(dateFilter)) return false;
+      return true;
+    });
+  }, [activeDocuments, dateFilter, documentSearch, documentTypeFilter, statusFilter]);
+
+  const handleExportActiveList = () => {
+    const rows = filteredActiveDocuments.map((d) => ({
+      name: d?.name,
+      type: d?.type,
+      size: d?.size,
+      recipients: Array.isArray(d?.recipients) ? d.recipients.map(r => `${r?.name || ''} (${r?.status || ''})`).filter(Boolean).join('; ') : '',
+      initiator: d?.initiator,
+      date_sent: d?.dateSent,
+      due_date: d?.dueDate,
+      status: d?.status,
+    }));
+
+    downloadCsv(
+      `esign_active_signatures_${new Date().toISOString().slice(0, 10)}.csv`,
+      rows,
+      ['name', 'type', 'size', 'recipients', 'initiator', 'date_sent', 'due_date', 'status']
+    );
+  };
+
+  const handleExportArchive = () => {
+    downloadCsv(
+      `esign_completed_archive_${new Date().toISOString().slice(0, 10)}.csv`,
+      archivedDocuments,
+      ['document_title', 'document_meta', 'recipients', 'date_completed', 'retention_tag', 'status']
+    );
+  };
+
+  const handleComplianceExport = () => {
+    downloadJson(
+      `esign_compliance_export_${new Date().toISOString().slice(0, 10)}.json`,
+      {
+        generated_at: new Date().toISOString(),
+        templates,
+        signature_activity: signatureActivity,
+        active_documents: activeDocuments,
+        completed_archive: archivedDocuments,
+      }
+    );
+  };
 
   const itemsPerPage = 5;
   const totalPages = Math.ceil(activeDocuments.length / itemsPerPage);
@@ -253,14 +342,14 @@ export default function ConsentESignature() {
                 <i className="fa-solid fa-plus"></i>
                 New Document
               </button>
-              <button className="btn small ghost-cd">
+              <button className="btn small ghost-cd" type="button" onClick={handleExportActiveList} disabled={filteredActiveDocuments.length === 0}>
                 <i className="fa-solid fa-file-export"></i>
                 Export List
               </button>
             </>
           ) : activeTab === 'completed-archive' ? (
             <>
-              <button className="btn small ghost-cd">
+              <button className="btn small ghost-cd" type="button" onClick={handleExportArchive} disabled={archivedDocuments.length === 0}>
                 <i className="fa-solid fa-download"></i>
                 Export
               </button>
@@ -848,7 +937,7 @@ export default function ConsentESignature() {
               </div>
             </div>
             <div className="notice-actions">
-              <button className="btn small-cd">
+              <button className="btn small-cd" type="button" onClick={handleComplianceExport}>
                 <i className="fa-solid fa-download"></i>
                 Compliance Export
               </button>

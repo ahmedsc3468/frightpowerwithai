@@ -63,6 +63,42 @@ input[type="checkbox"]:checked, input[type="radio"]:checked {
   gap: 20px;
 }
 
+/* Coming soon overlay (Carrier Marketplace Services) */
+.services-coming-soon-wrapper {
+  position: relative;
+}
+
+.services-coming-soon-content {
+  filter: blur(2px);
+  opacity: 0.55;
+  pointer-events: none;
+  user-select: none;
+}
+
+.services-coming-soon-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.65);
+  border-radius: 12px;
+}
+
+.services-coming-soon-badge {
+  font-weight: 750;
+  letter-spacing: 0.02em;
+  color: #6b7280;
+}
+
+.dark-root .services-coming-soon-overlay {
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.dark-root .services-coming-soon-badge {
+  color: #d1d5db;
+}
+
 /* Service Tabs */
 .services-header {
   margin-bottom: 20px;
