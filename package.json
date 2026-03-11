@@ -11,13 +11,14 @@
     "run:all": "powershell -ExecutionPolicy Bypass -File .\\run_all.ps1"
   },
   "dependencies": {
-      "jspdf": "^2.5.2",
     "@simplewebauthn/server": "^10.0.0",
     "firebase": "^12.6.0",
+    "jspdf": "^2.5.2",
     "jszip": "^3.10.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-    "react-router-dom": "^7.9.1"
+    "react-router-dom": "^7.9.1",
+    "recharts": "^2.15.4"
   },
   "devDependencies": {
     "@eslint/js": "^9.33.0",

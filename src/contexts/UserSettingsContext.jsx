@@ -24,6 +24,28 @@ const DEFAULT_SETTINGS = {
   font_size: 'Medium',
   high_contrast_mode: false,
   screen_reader_compatible: true,
+
+  // Extended preferences (carrier/driver dashboards)
+  default_currency: 'USD',
+  notification_channels: {
+    loads: { in_app: true, email: true, sms: false },
+    compliance: { in_app: true, email: true, sms: true },
+    finance: { in_app: true, email: true, sms: false },
+  },
+  quiet_hours_start: '10:00 PM',
+  quiet_hours_end: '7:00 AM',
+
+  invoice_prefix: 'FPA-',
+  invoice_numbering_format: 'Sequential',
+  payment_terms: 'Net 30',
+  auto_send_invoices_on_complete: false,
+
+  theme_preference: 'Light',
+  default_view: 'My Loads Default View',
+  my_loads_default_view: 'Active',
+
+  auto_categorize_documents: true,
+  auto_archive_completed_documents: false,
 };
 
 function coerceBoolean(value, defaultValue = false) {
@@ -59,7 +81,7 @@ function normalizeSettings(raw) {
   return {
     language: normalizeLanguage(s?.language),
     time_zone: s?.time_zone || '',
-    date_format: (s?.date_format === 'dmy' ? 'dmy' : 'mdy'),
+    date_format: (s?.date_format === 'dmy' ? 'dmy' : s?.date_format === 'ymd' ? 'ymd' : 'mdy'),
     start_dashboard_view: s?.start_dashboard_view || 'dashboard',
     auto_save_edits: coerceBoolean(s?.auto_save_edits, true),
     email_digest_enabled: coerceBoolean(s?.email_digest_enabled, true),
@@ -71,6 +93,39 @@ function normalizeSettings(raw) {
     font_size: (s?.font_size === 'Small' || s?.font_size === 'Large') ? s.font_size : 'Medium',
     high_contrast_mode: coerceBoolean(s?.high_contrast_mode, false),
     screen_reader_compatible: coerceBoolean(s?.screen_reader_compatible, true),
+
+    default_currency: String(s?.default_currency || 'USD').trim().toUpperCase() || 'USD',
+    notification_channels: (() => {
+      const rawNc = (s?.notification_channels && typeof s.notification_channels === 'object') ? s.notification_channels : {};
+      const normCat = (cat, defaults) => {
+        const v = rawNc?.[cat];
+        if (!v || typeof v !== 'object') return defaults;
+        return {
+          in_app: coerceBoolean(v?.in_app, defaults.in_app),
+          email: coerceBoolean(v?.email, defaults.email),
+          sms: coerceBoolean(v?.sms, defaults.sms),
+        };
+      };
+      return {
+        loads: normCat('loads', { in_app: true, email: true, sms: false }),
+        compliance: normCat('compliance', { in_app: true, email: true, sms: true }),
+        finance: normCat('finance', { in_app: true, email: true, sms: false }),
+      };
+    })(),
+    quiet_hours_start: String(s?.quiet_hours_start || '10:00 PM'),
+    quiet_hours_end: String(s?.quiet_hours_end || '7:00 AM'),
+
+    invoice_prefix: String(s?.invoice_prefix || 'FPA-'),
+    invoice_numbering_format: String(s?.invoice_numbering_format || 'Sequential'),
+    payment_terms: String(s?.payment_terms || 'Net 30'),
+    auto_send_invoices_on_complete: coerceBoolean(s?.auto_send_invoices_on_complete, false),
+
+    theme_preference: String(s?.theme_preference || 'Light'),
+    default_view: String(s?.default_view || 'My Loads Default View'),
+    my_loads_default_view: String(s?.my_loads_default_view || 'Active'),
+
+    auto_categorize_documents: coerceBoolean(s?.auto_categorize_documents, true),
+    auto_archive_completed_documents: coerceBoolean(s?.auto_archive_completed_documents, false),
   };
 }
 

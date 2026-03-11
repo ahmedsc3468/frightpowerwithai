@@ -103,6 +103,22 @@
   color: #0ea5e9;
 }
 
+.marketplace-tab:disabled,
+.marketplace-tab[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.marketplace-tab:disabled:hover,
+.marketplace-tab[aria-disabled="true"]:hover {
+  color: #9ca3af;
+}
+
+.marketplace-tab:disabled::after,
+.marketplace-tab[aria-disabled="true"]::after {
+  content: none;
+}
+
 /* underline for active tab matching ShipperPartners */
 .marketplace-tab.active::after {
   content: '';

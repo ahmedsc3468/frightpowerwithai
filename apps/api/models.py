@@ -86,10 +86,12 @@ class ProfileUpdate(BaseModel):
 class UserSettings(BaseModel):
     language: Optional[str] = None
     time_zone: Optional[str] = None
-    date_format: str = "mdy"  # mdy | dmy
+    date_format: str = "mdy"  # mdy | dmy | ymd
     start_dashboard_view: str = "dashboard"
     auto_save_edits: bool = True
     email_digest_enabled: bool = True
+    digest_frequency: str = "realtime"  # realtime | daily | weekly
+    escalation_rules_enabled: bool = False
 
     # Driver/Carrier UI preferences (safe for all roles; privileged roles can use them too,
     # but biometric auth enforcement is separate and remains backend-only).
@@ -102,6 +104,24 @@ class UserSettings(BaseModel):
     high_contrast_mode: bool = False
     screen_reader_compatible: bool = True
 
+    # Extended Preferences (Carrier/Driver dashboards)
+    default_currency: str = "USD"
+    notification_channels: Dict[str, Dict[str, bool]] = {}
+    quiet_hours_start: Optional[str] = None
+    quiet_hours_end: Optional[str] = None
+
+    invoice_prefix: Optional[str] = None
+    invoice_numbering_format: Optional[str] = None
+    payment_terms: Optional[str] = None
+    auto_send_invoices_on_complete: bool = False
+
+    theme_preference: Optional[str] = None
+    default_view: Optional[str] = None
+    my_loads_default_view: Optional[str] = None
+
+    auto_categorize_documents: bool = True
+    auto_archive_completed_documents: bool = False
+
 
 class UserSettingsUpdate(BaseModel):
     language: Optional[str] = None
@@ -110,6 +130,8 @@ class UserSettingsUpdate(BaseModel):
     start_dashboard_view: Optional[str] = None
     auto_save_edits: Optional[bool] = None
     email_digest_enabled: Optional[bool] = None
+    digest_frequency: Optional[str] = None
+    escalation_rules_enabled: Optional[bool] = None
 
     notification_preferences: Optional[Dict[str, bool]] = None
     calendar_sync: Optional[str] = None
@@ -117,6 +139,24 @@ class UserSettingsUpdate(BaseModel):
     font_size: Optional[str] = None
     high_contrast_mode: Optional[bool] = None
     screen_reader_compatible: Optional[bool] = None
+
+    # Extended Preferences (Carrier/Driver dashboards)
+    default_currency: Optional[str] = None
+    notification_channels: Optional[Dict[str, Dict[str, bool]]] = None
+    quiet_hours_start: Optional[str] = None
+    quiet_hours_end: Optional[str] = None
+
+    invoice_prefix: Optional[str] = None
+    invoice_numbering_format: Optional[str] = None
+    payment_terms: Optional[str] = None
+    auto_send_invoices_on_complete: Optional[bool] = None
+
+    theme_preference: Optional[str] = None
+    default_view: Optional[str] = None
+    my_loads_default_view: Optional[str] = None
+
+    auto_categorize_documents: Optional[bool] = None
+    auto_archive_completed_documents: Optional[bool] = None
 
 class UserProfile(BaseModel):
     uid: str

@@ -14,6 +14,73 @@ export default function ComplianceSafety() {
   const [aiAnalysis, setAiAnalysis] = useState(null);
   const [analyzingAI, setAnalyzingAI] = useState(false);
 
+  const [basicScores, setBasicScores] = useState([]);
+  const [basicHistory, setBasicHistory] = useState([]);
+  const [basicLoading, setBasicLoading] = useState(false);
+  const [basicError, setBasicError] = useState('');
+
+  const buildBasicScoreCards = useCallback((derived) => {
+    const categories = [
+      { key: 'hos', name: 'Hours of Service', icon: 'fa-clock', defaultThreshold: 65 },
+      { key: 'unsafe', name: 'Unsafe Driving', icon: 'fa-car-crash', defaultThreshold: 65 },
+      { key: 'maintenance', name: 'Vehicle Maintenance', icon: 'fa-wrench', defaultThreshold: 80 },
+      { key: 'crash', name: 'Crash Indicator', icon: 'fa-chart-line', defaultThreshold: 65 },
+      { key: 'drug', name: 'Drugs/Alcohol', icon: 'fa-pills', defaultThreshold: 50 },
+      { key: 'hazmat', name: 'HazMat', icon: 'fa-radiation', defaultThreshold: null },
+    ];
+
+    const safeDerived = (derived && typeof derived === 'object') ? derived : {};
+
+    const classify = (percentile, threshold) => {
+      if (percentile == null || threshold == null) return 'neutral';
+      if (percentile >= threshold) return 'critical';
+      if (percentile >= Math.round(threshold * 0.85)) return 'warning';
+      return 'success';
+    };
+
+    return categories.map((c) => {
+      const d = safeDerived[c.key] || {};
+      const percentile = (typeof d.percentile === 'number') ? d.percentile : null;
+      const threshold = (typeof d.threshold === 'number') ? d.threshold : c.defaultThreshold;
+
+      return {
+        name: c.name,
+        score: (typeof percentile === 'number') ? `${percentile}%` : 'N/A',
+        threshold: (typeof threshold === 'number') ? `${threshold}%` : 'Not Applicable',
+        status: classify(percentile, threshold),
+        icon: c.icon,
+        _key: c.key,
+        _percentile: percentile,
+        _threshold: threshold,
+      };
+    });
+  }, []);
+
+  const fetchBasicScores = useCallback(async (token) => {
+    setBasicLoading(true);
+    setBasicError('');
+    try {
+      const res = await fetch(`${API_URL}/compliance/basic-scores`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to load BASIC scores');
+      }
+      const data = await res.json();
+      const derived = data?.derived || {};
+      setBasicScores(buildBasicScoreCards(derived));
+      setBasicHistory(Array.isArray(data?.history) ? data.history : []);
+    } catch (e) {
+      console.warn('BASIC scores fetch warning:', e);
+      setBasicError(e?.message || 'Unable to load BASIC scores');
+      setBasicScores(buildBasicScoreCards({}));
+      setBasicHistory([]);
+    } finally {
+      setBasicLoading(false);
+    }
+  }, [buildBasicScoreCards]);
+
   // Compliance data from API
   const [complianceData, setComplianceData] = useState({
     dotNumber: '',
@@ -83,6 +150,9 @@ export default function ComplianceSafety() {
           if (dot || mc) {
             await fetchFmcsaInfo(token, dot, mc);
           }
+
+          // Fetch BASIC scores/trends (cached per-user on backend)
+          await fetchBasicScores(token);
         }
 
         // Fetch compliance tasks
@@ -102,7 +172,7 @@ export default function ComplianceSafety() {
     };
 
     fetchComplianceData();
-  }, [currentUser]);
+  }, [currentUser, fetchBasicScores]);
 
   // AI Analysis function
   const runAIAnalysis = async () => {
@@ -180,6 +250,7 @@ export default function ComplianceSafety() {
     try {
       const token = await currentUser.getIdToken();
       await fetchFmcsaInfo(token, complianceData.dotNumber, complianceData.mcNumber);
+      await fetchBasicScores(token);
     } catch (error) {
       console.error('FMCSA sync error:', error);
       const now = new Date();
@@ -203,50 +274,38 @@ export default function ComplianceSafety() {
     completeness: complianceStatus.breakdown.document_completeness || complianceStatus.breakdown.completeness || 0
   };
 
-  const basicScores = [
-    { 
-      name: 'Hours of Service', 
-      score: '15%', 
-      threshold: '65%', 
-      status: 'success',
-      icon: 'fa-clock'
-    },
-    { 
-      name: 'Unsafe Driving', 
-      score: '8%', 
-      threshold: '65%', 
-      status: 'success',
-      icon: 'fa-car-crash'
-    },
-    { 
-      name: 'Vehicle Maintenance', 
-      score: '45%', 
-      threshold: '80%', 
-      status: 'warning',
-      icon: 'fa-wrench'
-    },
-    { 
-      name: 'Crash Indicator', 
-      score: '12%', 
-      threshold: '65%', 
-      status: 'success',
-      icon: 'fa-chart-line'
-    },
-    { 
-      name: 'Drugs/Alcohol', 
-      score: '0%', 
-      threshold: '50%', 
-      status: 'success',
-      icon: 'fa-pills'
-    },
-    { 
-      name: 'HazMat', 
-      score: 'N/A', 
-      threshold: 'Not Applicable', 
-      status: 'neutral',
-      icon: 'fa-radiation'
-    }
+  const trendCategories = [
+    { key: 'hos', name: 'Hours of Service' },
+    { key: 'unsafe', name: 'Unsafe Driving' },
+    { key: 'maintenance', name: 'Vehicle Maintenance' },
+    { key: 'crash', name: 'Crash Indicator' },
+    { key: 'drug', name: 'Drugs/Alcohol' },
+    { key: 'hazmat', name: 'HazMat' },
   ];
+
+  const getTrendPoints = (categoryKey) => {
+    const items = Array.isArray(basicHistory) ? basicHistory : [];
+    const last = items.slice(-6);
+    return last.map((it) => {
+      const derived = it?.derived || {};
+      const d = derived?.[categoryKey] || {};
+      const percentile = (typeof d.percentile === 'number') ? d.percentile : null;
+      return {
+        day: it?.day || '',
+        percentile,
+      };
+    });
+  };
+
+  const trendDeltaText = (points) => {
+    if (!Array.isArray(points) || points.length < 2) return '';
+    const a = points[points.length - 2]?.percentile;
+    const b = points[points.length - 1]?.percentile;
+    if (typeof a !== 'number' || typeof b !== 'number') return '';
+    const delta = b - a;
+    if (delta === 0) return 'No change';
+    return delta > 0 ? `+${delta}%` : `${delta}%`;
+  };
 
   // Default tasks if API returns empty
   const defaultTasks = [
@@ -410,6 +469,7 @@ export default function ComplianceSafety() {
                     <i className={`fa-solid ${
                       score.status === 'success' ? 'fa-circle-check' : 
                       score.status === 'warning' ? 'fa-triangle-exclamation' : 
+                      score.status === 'critical' ? 'fa-circle-xmark' :
                       'fa-circle-info'
                     } status-icon`}></i>
                   </div>
@@ -423,10 +483,52 @@ export default function ComplianceSafety() {
           {/* BASIC Score Trends */}
           <div className="compliance-card score-trends">
             <h3>BASIC Score Trends</h3>
-            <div className="trends-placeholder">
-              <i className="fa-solid fa-chart-line trend-icon"></i>
-              <p>Score trend visualization would appear here</p>
-            </div>
+            {basicLoading ? (
+              <div className="trends-placeholder">
+                <i className="fa-solid fa-spinner fa-spin trend-icon"></i>
+                <p>Loading score trends...</p>
+              </div>
+            ) : basicError ? (
+              <div className="trends-placeholder">
+                <i className="fa-solid fa-triangle-exclamation trend-icon"></i>
+                <p>{basicError}</p>
+              </div>
+            ) : (Array.isArray(basicHistory) && basicHistory.length > 0) ? (
+              <div className="basic-trends">
+                {trendCategories.map((cat) => {
+                  const points = getTrendPoints(cat.key);
+                  const delta = trendDeltaText(points);
+
+                  return (
+                    <div key={cat.key} className="trend-row">
+                      <div className="trend-row-header">
+                        <span className="trend-name">{cat.name}</span>
+                        {delta ? <span className="trend-delta">{delta}</span> : null}
+                      </div>
+                      <div className="trend-bars" aria-label={`${cat.name} trend`}>
+                        {points.map((p, idx) => {
+                          const h = (typeof p.percentile === 'number') ? Math.max(0, Math.min(100, p.percentile)) : 0;
+                          return (
+                            <div
+                              key={`${cat.key}-${idx}`}
+                              className="trend-bar-wrap"
+                              title={p.day ? `${p.day}: ${p.percentile == null ? 'N/A' : `${p.percentile}%`}` : (p.percentile == null ? 'N/A' : `${p.percentile}%`)}
+                            >
+                              <div className={`trend-bar ${p.percentile == null ? 'neutral' : ''}`} style={{ height: `${h}%` }} />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="trends-placeholder">
+                <i className="fa-solid fa-chart-line trend-icon"></i>
+                <p>No trend history yet. Use “Run Nightly Sync” to start tracking.</p>
+              </div>
+            )}
           </div>
 
           {/* Compliance Tasks */}

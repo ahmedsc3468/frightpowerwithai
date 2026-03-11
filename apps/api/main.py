@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse, FileResponse, StreamingResponse
 from pydantic import BaseModel, root_validator, Field
 from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import uuid
 import json
 import time
@@ -109,6 +109,118 @@ from .ai_utils import calculate_load_cost
 from .notify import send_webhook
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_time_range(*, time_range: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Tuple[float, float, str]:
+    """Return (start_ts, end_ts, normalized_label) in UTC epoch seconds."""
+    label = str(time_range or "").strip() or "Last 30 Days"
+    now_dt = datetime.now(timezone.utc)
+    end_ts = float(now_dt.timestamp())
+
+    normalized = label
+    if label.lower() in {"last 7 days", "7d", "last7"}:
+        start_ts = float((now_dt - timedelta(days=7)).timestamp())
+        normalized = "Last 7 Days"
+    elif label.lower() in {"last 30 days", "30d", "last30"}:
+        start_ts = float((now_dt - timedelta(days=30)).timestamp())
+        normalized = "Last 30 Days"
+    elif label.lower() in {"last 90 days", "90d", "last90"}:
+        start_ts = float((now_dt - timedelta(days=90)).timestamp())
+        normalized = "Last 90 Days"
+    elif label.lower() in {"this year", "ytd", "year to date"}:
+        start_dt = datetime(now_dt.year, 1, 1, tzinfo=timezone.utc)
+        start_ts = float(start_dt.timestamp())
+        normalized = "This Year"
+    elif label.lower() in {"custom range", "custom"}:
+        # Best-effort: accept ISO dates for custom range; otherwise fall back to last 30.
+        start_ts = float((now_dt - timedelta(days=30)).timestamp())
+        normalized = "Custom Range"
+        if start_date:
+            try:
+                sdt = datetime.fromisoformat(str(start_date).strip()).replace(tzinfo=timezone.utc)
+                start_ts = float(sdt.timestamp())
+            except Exception:
+                pass
+        if end_date:
+            try:
+                edt = datetime.fromisoformat(str(end_date).strip()).replace(tzinfo=timezone.utc)
+                end_ts = float(edt.timestamp())
+            except Exception:
+                pass
+    else:
+        start_ts = float((now_dt - timedelta(days=30)).timestamp())
+        normalized = "Last 30 Days"
+
+    # Ensure ordering.
+    if start_ts > end_ts:
+        start_ts, end_ts = end_ts, start_ts
+    return (start_ts, end_ts, normalized)
+
+
+def _extract_state(value: Any) -> str:
+    if isinstance(value, dict):
+        state = str(value.get("state") or "").strip()
+        if state:
+            return state.upper()
+        label = str(value.get("label") or value.get("name") or "").strip()
+        value = label
+    if not isinstance(value, str):
+        return "Unknown"
+    s = value.strip()
+    if not s:
+        return "Unknown"
+    # Common pattern: "City, ST".
+    if "," in s:
+        tail = s.split(",")[-1].strip()
+        if len(tail) in {2, 3}:
+            return tail.upper()
+    # Try last token.
+    parts = [p for p in s.replace("/", " ").split() if p]
+    if parts:
+        tail = parts[-1].strip()
+        if len(tail) == 2 and tail.isalpha():
+            return tail.upper()
+    return "Unknown"
+
+
+def _load_total_rate(load: Dict[str, Any]) -> Optional[float]:
+    # Prefer explicit totals.
+    for key in ("amount_total", "total_rate", "total", "rate"):
+        try:
+            v = load.get(key)
+            if v is not None:
+                f = float(v)
+                if f > 0:
+                    return f
+        except Exception:
+            continue
+
+    # Reconstruct best-effort from linehaul + fuel + advanced charges.
+    try:
+        linehaul = float(load.get("linehaul_rate") or 0.0)
+        fuel = float(load.get("fuel_surcharge") or 0.0)
+        adv = load.get("advanced_charges")
+        adv_total = 0.0
+        if isinstance(adv, list):
+            for item in adv:
+                if isinstance(item, dict):
+                    adv_total += float(item.get("amount") or 0.0)
+        total = linehaul + fuel + adv_total
+        return total if total > 0 else None
+    except Exception:
+        return None
+
+
+def _format_pct(value: Optional[float]) -> str:
+    try:
+        if value is None:
+            return "0.0%"
+        return f"{float(value):.1f}%"
+    except Exception:
+        return "0.0%"
+
+
+ 
 
 
 def _normalize_role_filter(role: str) -> str:
@@ -446,6 +558,9 @@ def _project_user(doc_id: str, d: dict) -> dict:
 
 # ResponseStore is used by RAG, onboarding chatbot, and several helper flows.
 store = ResponseStore(base_dir=str(Path(__file__).resolve().parents[2] / "data"))
+
+# FMCSA client is lazily created in _get_fmcsa_client().
+fmcsa_client: "FmcsaClient | None" = None
 
 
 # --- FastAPI App ---
@@ -4085,6 +4200,202 @@ async def get_driver_dashboard_insights_metrics(user: Dict[str, Any] = Depends(r
     }
 
 
+@app.get("/carrier/analytics")
+async def get_carrier_analytics(
+    time_range: str = "Last 30 Days",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    role = str(user.get("role") or "").strip().lower()
+    if role != "carrier":
+        raise HTTPException(status_code=403, detail="Only carriers can access carrier analytics")
+
+    uid = str(user.get("uid") or "").strip()
+    if not uid:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    start_ts, end_ts, normalized_range = _parse_time_range(
+        time_range=time_range,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+    loads = _collect_carrier_loads(uid)
+
+    def _load_activity_ts(load: Dict[str, Any]) -> Optional[float]:
+        """Best-effort timestamp to decide whether a load belongs in the requested range.
+
+        Prefer business-relevant dates (delivery/pickup) over metadata timestamps.
+        """
+
+        # If delivered, use the actual delivery time.
+        delivered_ts = _to_epoch_seconds(load.get("delivered_at"))
+        if delivered_ts is None:
+            delivered_ts = _to_epoch_seconds(load.get("completed_at"))
+        if delivered_ts is not None:
+            return float(delivered_ts)
+
+        # Otherwise use scheduled dates.
+        for key in (
+            "delivery_datetime",
+            "delivery_date",
+            "pickup_datetime",
+            "pickup_date",
+        ):
+            ts = _to_epoch_seconds(load.get(key))
+            if ts is not None:
+                return float(ts)
+
+        # Fall back to metadata timestamps.
+        ts = _to_epoch_seconds(load.get("updated_at")) or _to_epoch_seconds(load.get("created_at"))
+        return float(ts) if ts is not None else None
+
+    def in_range(ts: Optional[float]) -> bool:
+        if ts is None:
+            return False
+        return float(start_ts) <= float(ts) <= float(end_ts)
+
+    scoped: List[Dict[str, Any]] = []
+    for load in loads:
+        ts = _load_activity_ts(load)
+        if in_range(ts):
+            scoped.append(load)
+
+    tendered_count = 0
+    accepted_count = 0
+    delivered_count = 0
+    on_time_total = 0
+    on_time_yes = 0
+    rpm_rate_total = 0.0
+    rpm_miles_total = 0.0
+    rpu_values: List[float] = []
+
+    accepted_states = {
+        LoadStatus.ACCEPTED.value,
+        LoadStatus.COVERED.value,
+        LoadStatus.IN_TRANSIT.value,
+        LoadStatus.DELIVERED.value,
+        LoadStatus.COMPLETED.value,
+    }
+    accepted_states.add("settled")
+    delivered_states = {LoadStatus.DELIVERED.value, LoadStatus.COMPLETED.value, "settled"}
+
+    ot_buckets: Dict[str, Dict[str, int]] = {}
+    region_counts: Dict[str, int] = {}
+    status_counts: Dict[str, int] = {}
+
+    for load in scoped:
+        status = str(load.get("status") or "").strip().lower() or "unknown"
+        if status != LoadStatus.DRAFT.value:
+            tendered_count += 1
+
+        if status in accepted_states:
+            accepted_count += 1
+
+        if status in delivered_states:
+            delivered_count += 1
+
+        status_counts[status] = int(status_counts.get(status) or 0) + 1
+
+        dest_state = _extract_state(
+            load.get("destination") or load.get("delivery_location") or load.get("load_destination")
+        )
+        region_counts[dest_state] = int(region_counts.get(dest_state) or 0) + 1
+
+        delivered_at = _to_epoch_seconds(load.get("delivered_at"))
+        if delivered_at is None:
+            delivered_at = _to_epoch_seconds(load.get("completed_at"))
+
+        if delivered_at is not None and in_range(delivered_at):
+            eta_raw = load.get("delivery_date") or load.get("delivery_datetime") or load.get("eta")
+            eta_ts = _to_epoch_seconds(eta_raw)
+            if eta_ts is not None:
+                try:
+                    if isinstance(eta_raw, str) and len(eta_raw.strip()) <= 10:
+                        eta_dt = datetime.fromisoformat(eta_raw.strip()).replace(tzinfo=timezone.utc)
+                        eta_ts = float((eta_dt + timedelta(days=1, seconds=-1)).timestamp())
+                except Exception:
+                    pass
+
+                on_time_total += 1
+                is_on_time = float(delivered_at) <= float(eta_ts)
+                if is_on_time:
+                    on_time_yes += 1
+
+                day = datetime.fromtimestamp(float(delivered_at), tz=timezone.utc).date().isoformat()
+                bucket = ot_buckets.setdefault(day, {"delivered": 0, "on_time": 0})
+                bucket["delivered"] += 1
+                if is_on_time:
+                    bucket["on_time"] += 1
+
+        if status in delivered_states:
+            total_rate = _load_total_rate(load)
+            miles = None
+            try:
+                miles = float(
+                    load.get("estimated_distance")
+                    or load.get("distance_miles")
+                    or load.get("miles")
+                    or load.get("distance")
+                    or 0.0
+                )
+            except Exception:
+                miles = None
+            if total_rate is not None:
+                rpu_values.append(float(total_rate))
+                if miles and miles > 0:
+                    rpm_rate_total += float(total_rate)
+                    rpm_miles_total += float(miles)
+
+    on_time_pct = (float(on_time_yes) / float(on_time_total) * 100.0) if on_time_total > 0 else 0.0
+    avg_rpm = (float(rpm_rate_total) / float(rpm_miles_total)) if rpm_miles_total > 0 else 0.0
+    avg_rpu = (sum(rpu_values) / len(rpu_values)) if rpu_values else 0.0
+
+    on_time_series: List[Dict[str, Any]] = []
+    for day in sorted(ot_buckets.keys()):
+        d = ot_buckets[day]
+        delivered = int(d.get("delivered") or 0)
+        on_time = int(d.get("on_time") or 0)
+        pct = (float(on_time) / float(delivered) * 100.0) if delivered > 0 else 0.0
+        on_time_series.append({"date": day, "on_time_pct": round(pct, 2), "delivered": delivered})
+
+    region_rows = sorted(region_counts.items(), key=lambda it: (-int(it[1] or 0), it[0]))
+    top = region_rows[:8]
+    other_total = sum(int(v or 0) for _, v in region_rows[8:])
+    loads_by_region = [{"region": k, "loads": int(v)} for k, v in top]
+    if other_total > 0:
+        loads_by_region.append({"region": "Other", "loads": int(other_total)})
+
+    load_distribution = [
+        {"status": k, "loads": int(v)}
+        for k, v in sorted(status_counts.items(), key=lambda it: (-int(it[1] or 0), it[0]))
+    ]
+
+    return {
+        "time_range": normalized_range,
+        "start_ts": float(start_ts),
+        "end_ts": float(end_ts),
+        "stats": {
+            "loads_tendered": int(tendered_count),
+            "accepted": int(accepted_count),
+            "delivered": int(delivered_count),
+            "on_time_percent": float(round(on_time_pct, 2)),
+            "on_time_percent_label": _format_pct(on_time_pct),
+            "avg_rpm": float(round(avg_rpm, 4)),
+            "avg_rpm_label": f"${avg_rpm:,.2f}",
+            "avg_rpu": float(round(avg_rpu, 2)),
+            "avg_rpu_label": f"${avg_rpu:,.0f}",
+            "loads_in_range": int(len(scoped)),
+        },
+        "charts": {
+            "on_time_series": on_time_series,
+            "loads_by_region": loads_by_region,
+            "load_distribution": load_distribution,
+        },
+    }
+
+
 @app.get("/carrier/dashboard/insights")
 async def get_carrier_dashboard_insights(user: Dict[str, Any] = Depends(get_current_user)):
     role = str(user.get("role") or "").strip().lower()
@@ -5144,6 +5455,224 @@ async def get_compliance_status_dashboard(user: dict = Depends(get_current_user)
     }
 
 
+def _coerce_percent(value: Any) -> Optional[int]:
+    """Coerce a value like 15, "15", "15%" to an int percentile (0-100)."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            iv = int(round(float(value)))
+        except Exception:
+            return None
+        return iv if 0 <= iv <= 100 else None
+    try:
+        s = str(value).strip()
+    except Exception:
+        return None
+    if not s or s.lower() in {"n/a", "na", "none", "null"}:
+        return None
+    s = s.replace("%", "").strip()
+    try:
+        iv = int(round(float(s)))
+    except Exception:
+        return None
+    return iv if 0 <= iv <= 100 else None
+
+
+def _pick_first(d: Any, keys: list[str]) -> Any:
+    if not isinstance(d, dict):
+        return None
+    for k in keys:
+        if k in d and d.get(k) is not None:
+            return d.get(k)
+    return None
+
+
+def _derive_fmcsa_basics(basics_raw: Any) -> Dict[str, Any]:
+    """Best-effort extraction of BASIC percentile/threshold values from FMCSA basics payload."""
+    # If FMCSA returns a list of BASIC objects, normalize into a dict by name.
+    basics_dict: Dict[str, Any] = {}
+    if isinstance(basics_raw, list):
+        for item in basics_raw:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("basic") or item.get("name") or item.get("basicName") or "").strip().lower()
+            if not name:
+                continue
+            basics_dict[name] = item
+    elif isinstance(basics_raw, dict):
+        basics_dict = basics_raw
+
+    def _find_for_category(category_aliases: list[str]) -> Dict[str, Optional[int]]:
+        # 1) Look for explicit keys in a flat dict (common patterns)
+        if isinstance(basics_dict, dict):
+            candidates: list[tuple[list[str], list[str]]] = []
+            for a in category_aliases:
+                base = a.replace(" ", "").replace("/", "").replace("-", "").lower()
+                candidates.append(
+                    (
+                        [
+                            f"{base}_percentile",
+                            f"{base}Percentile",
+                            f"{base}_pct",
+                            f"{base}Pct",
+                            f"{base}_score",
+                            f"{base}Score",
+                        ],
+                        [
+                            f"{base}_threshold",
+                            f"{base}Threshold",
+                            f"{base}_intervention_threshold",
+                            f"{base}InterventionThreshold",
+                        ],
+                    )
+                )
+
+            # Extra known variants from some FMCSA/SMS payloads
+            known_variants = {
+                "hos": (["hosPercentile", "hoursOfServicePercentile", "hours_of_service_percentile"], ["hosThreshold", "hoursOfServiceThreshold", "hours_of_service_threshold"]),
+                "unsafe": (["unsafeDrivingPercentile", "unsafe_driving_percentile"], ["unsafeDrivingThreshold", "unsafe_driving_threshold"]),
+                "maintenance": (["vehicleMaintenancePercentile", "vehicle_maintenance_percentile"], ["vehicleMaintenanceThreshold", "vehicle_maintenance_threshold"]),
+                "crash": (["crashIndicatorPercentile", "crash_indicator_percentile"], ["crashIndicatorThreshold", "crash_indicator_threshold"]),
+                "drug": (["drugAlcoholPercentile", "drug_alcohol_percentile", "drugsAlcoholPercentile"], ["drugAlcoholThreshold", "drug_alcohol_threshold", "drugsAlcoholThreshold"]),
+                "hazmat": (["hazmatPercentile", "hazmat_percentile"], ["hazmatThreshold", "hazmat_threshold"]),
+            }
+            for alias in category_aliases:
+                if alias in known_variants:
+                    p_keys, t_keys = known_variants[alias]
+                    candidates.insert(0, (p_keys, t_keys))
+
+            percentile = None
+            threshold = None
+            for p_keys, t_keys in candidates:
+                if percentile is None:
+                    percentile = _coerce_percent(_pick_first(basics_dict, p_keys))
+                if threshold is None:
+                    threshold = _coerce_percent(_pick_first(basics_dict, t_keys))
+                if percentile is not None or threshold is not None:
+                    break
+
+            # 2) If basics_dict is keyed by BASIC name, try those nested objects
+            if percentile is None and threshold is None:
+                for alias in category_aliases:
+                    nested = basics_dict.get(alias) if isinstance(basics_dict, dict) else None
+                    if not isinstance(nested, dict):
+                        continue
+                    percentile = _coerce_percent(
+                        _pick_first(nested, ["percentile", "Percentile", "pct", "score", "value"])
+                    )
+                    threshold = _coerce_percent(
+                        _pick_first(nested, ["threshold", "Threshold", "interventionThreshold"])
+                    )
+                    if percentile is not None or threshold is not None:
+                        break
+
+            return {"percentile": percentile, "threshold": threshold}
+
+        return {"percentile": None, "threshold": None}
+
+    derived = {
+        "hos": _find_for_category(["hos", "hours of service", "hours_of_service"]),
+        "unsafe": _find_for_category(["unsafe", "unsafe driving", "unsafe_driving"]),
+        "maintenance": _find_for_category(["maintenance", "vehicle maintenance", "vehicle_maintenance"]),
+        "crash": _find_for_category(["crash", "crash indicator", "crash_indicator"]),
+        "drug": _find_for_category(["drug", "drugs/alcohol", "drugs_alcohol", "drug/alcohol", "drug_alcohol"]),
+        "hazmat": _find_for_category(["hazmat", "haz mat", "hm"]),
+    }
+    return derived
+
+
+def _append_daily_basics_snapshot(history: Any, derived: Dict[str, Any], now_ts: float) -> list[Dict[str, Any]]:
+    day = datetime.fromtimestamp(float(now_ts), tz=timezone.utc).date().isoformat()
+    items: list[Dict[str, Any]] = history if isinstance(history, list) else []
+
+    # Replace the snapshot for this day if present, else append.
+    replaced = False
+    for i, item in enumerate(items):
+        if isinstance(item, dict) and item.get("day") == day:
+            items[i] = {"day": day, "derived": derived}
+            replaced = True
+            break
+    if not replaced:
+        items.append({"day": day, "derived": derived})
+
+    # Keep only the most recent 90 days.
+    def _day_key(it: Dict[str, Any]) -> str:
+        try:
+            return str(it.get("day") or "")
+        except Exception:
+            return ""
+    items.sort(key=_day_key)
+    return items[-90:]
+
+
+@app.get("/compliance/basic-scores")
+async def get_compliance_basic_scores(user: dict = Depends(get_current_user)):
+    """Return BASIC scores and trend history for the authenticated carrier."""
+    uid = user.get("uid")
+    dot_number = (user.get("dot_number") or "").strip()
+
+    if not uid:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    if not dot_number:
+        return {
+            "success": True,
+            "usdot": None,
+            "as_of": datetime.now(timezone.utc).isoformat(),
+            "raw_basics": None,
+            "derived": {},
+            "history": [],
+        }
+
+    user_ref = db.collection("users").document(str(uid))
+    doc = user_ref.get().to_dict() or {}
+
+    raw_basics = doc.get("fmcsa_basics_latest")
+    derived = doc.get("fmcsa_basics_derived_latest") if isinstance(doc.get("fmcsa_basics_derived_latest"), dict) else None
+    history = doc.get("fmcsa_basics_history") if isinstance(doc.get("fmcsa_basics_history"), list) else []
+
+    # If nothing cached yet, fetch live (best-effort).
+    if raw_basics is None:
+        try:
+            client = _get_fmcsa_client()
+            raw_basics = client.get_basics(dot_number)
+        except Exception:
+            raw_basics = None
+
+    if derived is None:
+        derived = _derive_fmcsa_basics(raw_basics)
+
+    # Best-effort cache.
+    try:
+        now_ts = time.time()
+        history2 = _append_daily_basics_snapshot(history, derived, now_ts) if derived else history
+        user_ref.set(
+            {
+                "fmcsa_basics_latest": raw_basics,
+                "fmcsa_basics_derived_latest": derived,
+                "fmcsa_basics_last_fetched_at": now_ts,
+                "fmcsa_basics_history": history2,
+                "updated_at": now_ts,
+            },
+            merge=True,
+        )
+        history = history2
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "usdot": dot_number,
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "raw_basics": raw_basics,
+        "derived": derived,
+        "history": history,
+    }
+
+
 @app.get("/fmcsa/{usdot}")
 def get_fmcsa(usdot: str):
     profile = store.get_fmcsa_profile(usdot)
@@ -5199,6 +5728,29 @@ async def fmcsa_verify(
             or _pick(basics_sec, "safetyRating", "safety_rating")
         )
         dot_status = _pick(carrier_sec, "status", "carrierStatus", "operatingStatus", "dotStatus", "dot_status")
+
+        # Persist basics for carrier dashboard (best-effort).
+        try:
+            uid = user.get("uid")
+            if uid:
+                derived_basics = _derive_fmcsa_basics(basics_sec)
+                user_ref = db.collection("users").document(str(uid))
+                before_doc = user_ref.get().to_dict() or {}
+                history = before_doc.get("fmcsa_basics_history") if isinstance(before_doc.get("fmcsa_basics_history"), list) else []
+                now_ts = time.time()
+                history2 = _append_daily_basics_snapshot(history, derived_basics, now_ts)
+                user_ref.set(
+                    {
+                        "fmcsa_basics_latest": basics_sec,
+                        "fmcsa_basics_derived_latest": derived_basics,
+                        "fmcsa_basics_last_fetched_at": now_ts,
+                        "fmcsa_basics_history": history2,
+                        "updated_at": now_ts,
+                    },
+                    merge=True,
+                )
+        except Exception:
+            pass
         
         # Save verification result
         store.save_fmcsa_verification(result)
@@ -9950,6 +10502,10 @@ async def get_notifications(
 
     messages_on = _pref_on("messages", True)
     compliance_on = _pref_on("compliance_alerts", True)
+    loads_on = _pref_on("loads", True)
+    finance_on = _pref_on("finance", True)
+    system_on = _pref_on("system", True)
+    driver_dispatch_on = _pref_on("driver_dispatch", True)
 
     def _allowed_by_prefs(n: Dict[str, Any]) -> bool:
         try:
@@ -9961,13 +10517,34 @@ async def get_notifications(
             if is_compliance and not compliance_on:
                 return False
 
+            is_load = (typ == "load_update") or (cat == "loads") or (resource in {"load", "loads"})
+            if is_load and not loads_on:
+                return False
+
+            is_finance = (typ in {"payment", "finance", "invoice"}) or (cat == "finance") or (resource in {"invoice", "payment", "finance"})
+            if is_finance and not finance_on:
+                return False
+
+            is_system = (typ == "system") or (cat == "system") or (resource == "system")
+            if is_system and not system_on:
+                return False
+
             is_message = (
                 typ.startswith("message")
                 or "messag" in typ
                 or cat in {"messaging", "messages"}
                 or resource in {"message", "messaging", "thread", "conversation"}
             )
-            if is_message and not messages_on:
+            if is_message and (not messages_on or not driver_dispatch_on):
+                return False
+
+            # Driver/dispatch (HOS, dispatch, equipment, inspections) is a catch-all.
+            is_driver_dispatch = (
+                cat in {"driver", "dispatch", "driver/dispatch"}
+                or resource in {"driver", "dispatch", "hos", "equipment", "inspection"}
+                or any(k in typ for k in ["driver", "dispatch", "hos", "inspection", "equipment"])
+            )
+            if is_driver_dispatch and not driver_dispatch_on:
                 return False
         except Exception:
             return True
@@ -10075,6 +10652,40 @@ async def mark_notification_read(
     except Exception as e:
         print(f"Error marking notification as read: {e}")
         raise HTTPException(status_code=500, detail="Failed to mark notification as read")
+
+
+@app.post("/notifications/test")
+async def send_test_notification(user: Dict[str, Any] = Depends(get_current_user)):
+    """Create an in-app test notification for the current user.
+
+    Authorization: All authenticated users
+    """
+    uid = user.get("uid")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    try:
+        now = int(time.time())
+        notification_id = str(uuid.uuid4())
+        payload: Dict[str, Any] = {
+            "id": notification_id,
+            "user_id": str(uid),
+            "notification_type": "system",
+            "category": "system",
+            "priority": "Info",
+            "title": "Test Notification",
+            "message": "This is a test notification generated from your Alerts settings.",
+            "resource_type": "system",
+            "resource_id": None,
+            "action_url": None,
+            "is_read": False,
+            "created_at": now,
+        }
+        db.collection("notifications").document(notification_id).set(payload)
+        return JSONResponse(content={"success": True, "notification": payload})
+    except Exception as e:
+        print(f"Error sending test notification: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send test notification")
 
 
 # --- Email Utility Functions ---

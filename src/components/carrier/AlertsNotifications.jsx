@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { API_URL } from '../../config';
 import '../../styles/carrier/AlertsNotifications.css';
@@ -13,6 +13,39 @@ const AlertsNotifications = () => {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [exporting, setExporting] = useState(false);
+
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsError, setSettingsError] = useState('');
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+
+  const [categoryToggles, setCategoryToggles] = useState({
+    loads: true,
+    compliance_alerts: true,
+    finance: true,
+    driver_dispatch: true,
+    system: true,
+  });
+
+  const [deliveryChannels, setDeliveryChannels] = useState({
+    loads: { in_app: true, email: true, sms: false, push: true },
+    compliance: { in_app: true, email: true, sms: false, push: false },
+    finance: { in_app: true, email: true, sms: false, push: false },
+    driver_dispatch: { in_app: true, email: false, sms: false, push: false },
+    system: { in_app: true, email: false, sms: false, push: true },
+  });
+
+  const [quietHoursEnabled, setQuietHoursEnabled] = useState(true);
+  const [quietHoursStart, setQuietHoursStart] = useState('22:00');
+  const [quietHoursEnd, setQuietHoursEnd] = useState('06:00');
+
+  const [digestFrequency, setDigestFrequency] = useState('realtime');
+  const [escalationRulesEnabled, setEscalationRulesEnabled] = useState(false);
+  const [testNotificationEnabled, setTestNotificationEnabled] = useState(true);
+
+  const autoSaveTimerRef = useRef(null);
+  const skipAutoSaveRef = useRef(true);
 
   // Fetch notifications from API
   useEffect(() => {
@@ -20,6 +53,23 @@ const AlertsNotifications = () => {
       fetchNotifications();
     }
   }, [currentUser, activeTab]);
+
+  useEffect(() => {
+    if (currentUser && activeTab === 'Settings') {
+      fetchAlertSettings();
+    }
+  }, [currentUser, activeTab]);
+
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    if (activeTab !== 'Settings') return;
+    if (skipAutoSaveRef.current) {
+      skipAutoSaveRef.current = false;
+      return;
+    }
+    scheduleAutoSave();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categoryToggles, deliveryChannels, quietHoursEnabled, quietHoursStart, quietHoursEnd, digestFrequency, escalationRulesEnabled, testNotificationEnabled, settingsLoaded, activeTab]);
 
   const fetchNotifications = async () => {
     if (!currentUser) return;
@@ -98,6 +148,298 @@ const AlertsNotifications = () => {
     }
   };
 
+  const fetchAlertSettings = async () => {
+    if (!currentUser) return;
+
+    setSettingsLoading(true);
+    setSettingsError('');
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch(`${API_URL}/auth/settings`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to load alert settings');
+      }
+
+      const data = await response.json();
+      const prefs = (data && typeof data === 'object' && data.notification_preferences && typeof data.notification_preferences === 'object')
+        ? data.notification_preferences
+        : {};
+
+      // Category toggles
+      setCategoryToggles(prev => ({
+        ...prev,
+        loads: prefs.loads !== undefined ? !!prefs.loads : prev.loads,
+        compliance_alerts: prefs.compliance_alerts !== undefined ? !!prefs.compliance_alerts : prev.compliance_alerts,
+        finance: prefs.finance !== undefined ? !!prefs.finance : prev.finance,
+        driver_dispatch: prefs.driver_dispatch !== undefined ? !!prefs.driver_dispatch : prev.driver_dispatch,
+        system: prefs.system !== undefined ? !!prefs.system : prev.system,
+      }));
+
+      // Delivery channels
+      const channels = (data && typeof data === 'object' && data.notification_channels && typeof data.notification_channels === 'object')
+        ? data.notification_channels
+        : {};
+
+      setDeliveryChannels(prev => {
+        const merged = { ...prev };
+        for (const [cat, val] of Object.entries(channels)) {
+          if (!val || typeof val !== 'object') continue;
+          if (!merged[cat]) merged[cat] = { in_app: true, email: false, sms: false, push: false };
+          merged[cat] = {
+            ...merged[cat],
+            in_app: val.in_app !== undefined ? !!val.in_app : merged[cat].in_app,
+            email: val.email !== undefined ? !!val.email : merged[cat].email,
+            sms: val.sms !== undefined ? !!val.sms : merged[cat].sms,
+            push: val.push !== undefined ? !!val.push : merged[cat].push,
+          };
+        }
+        return merged;
+      });
+
+      // Quiet hours
+      const qStart = data?.quiet_hours_start || null;
+      const qEnd = data?.quiet_hours_end || null;
+      const enabled = !!(qStart && qEnd);
+      setQuietHoursEnabled(enabled);
+      setQuietHoursStart(enabled ? qStart : '22:00');
+      setQuietHoursEnd(enabled ? qEnd : '06:00');
+
+      const df = String(data?.digest_frequency || '').toLowerCase() || 'realtime';
+      setDigestFrequency(['realtime', 'daily', 'weekly'].includes(df) ? df : 'realtime');
+      setEscalationRulesEnabled(!!data?.escalation_rules_enabled);
+      setTestNotificationEnabled(prefs.test_notifications !== undefined ? !!prefs.test_notifications : true);
+
+      skipAutoSaveRef.current = true;
+      setSettingsLoaded(true);
+    } catch (error) {
+      console.error('Error fetching alert settings:', error);
+      setSettingsError('Failed to load settings');
+      setSettingsLoaded(false);
+    } finally {
+      setSettingsLoading(false);
+    }
+  };
+
+  const buildSettingsPatchPayload = () => {
+    const notification_preferences = {
+      ...categoryToggles,
+      // Keep legacy key in sync: backend already uses "messages" for filtering.
+      messages: !!categoryToggles.driver_dispatch,
+      test_notifications: !!testNotificationEnabled,
+    };
+
+    const quiet_hours_start = quietHoursEnabled ? quietHoursStart : null;
+    const quiet_hours_end = quietHoursEnabled ? quietHoursEnd : null;
+
+    return {
+      notification_preferences,
+      notification_channels: deliveryChannels,
+      quiet_hours_start,
+      quiet_hours_end,
+      digest_frequency: digestFrequency,
+      escalation_rules_enabled: escalationRulesEnabled,
+    };
+  };
+
+  const saveAlertSettings = async () => {
+    if (!currentUser) return;
+
+    setSettingsSaving(true);
+    setSettingsError('');
+    try {
+      const token = await currentUser.getIdToken();
+      const payload = buildSettingsPatchPayload();
+      const response = await fetch(`${API_URL}/auth/settings`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save settings');
+      }
+
+      // Keep local state aligned with canonical values.
+      const data = await response.json();
+      if (data && typeof data === 'object') {
+        setEscalationRulesEnabled(!!data.escalation_rules_enabled);
+        const df = String(data.digest_frequency || '').toLowerCase() || digestFrequency;
+        setDigestFrequency(['realtime', 'daily', 'weekly'].includes(df) ? df : digestFrequency);
+      }
+    } catch (error) {
+      console.error('Error saving alert settings:', error);
+      setSettingsError('Failed to save settings');
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const scheduleAutoSave = () => {
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
+    autoSaveTimerRef.current = setTimeout(() => {
+      saveAlertSettings();
+    }, 600);
+  };
+
+  const handleSendTestNotification = async () => {
+    if (!currentUser) return;
+    if (!testNotificationEnabled) return;
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch(`${API_URL}/notifications/test`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      if (!response.ok) {
+        throw new Error('Failed to send test notification');
+      }
+      // Refresh notification center data so the new item appears immediately.
+      await fetchNotifications();
+      alert('Test notification sent.');
+    } catch (error) {
+      console.error('Error sending test notification:', error);
+      alert('Failed to send test notification.');
+    }
+  };
+
+  const escapeCsvCell = (value) => {
+    if (value === null || value === undefined) return '';
+    let text = value;
+    if (typeof value === 'object') {
+      try {
+        text = JSON.stringify(value);
+      } catch {
+        text = String(value);
+      }
+    }
+    text = String(text);
+    if (/[",\n\r]/.test(text)) {
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+  };
+
+  const downloadCsv = (csvText, filename) => {
+    const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const fetchAllNotificationsForExport = async () => {
+    if (!currentUser) return [];
+
+    const token = await currentUser.getIdToken();
+    const pageSize = 200;
+    let page = 1;
+    let total = null;
+    const all = [];
+
+    while (true) {
+      const response = await fetch(`${API_URL}/notifications?page=${page}&page_size=${pageSize}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch notifications (page ${page})`);
+      }
+
+      const data = await response.json();
+      const batch = Array.isArray(data.notifications) ? data.notifications : [];
+      if (total === null && typeof data.total === 'number') {
+        total = data.total;
+      }
+
+      all.push(...batch);
+
+      if (batch.length === 0) break;
+      if (total !== null && all.length >= total) break;
+      if (batch.length < pageSize) break;
+      page += 1;
+      if (page > 1000) break;
+    }
+
+    return all;
+  };
+
+  const buildNotificationsCsv = (rawNotifications) => {
+    const rows = Array.isArray(rawNotifications) ? rawNotifications : [];
+
+    const preferredOrder = [
+      'id',
+      'title',
+      'message',
+      'notification_type',
+      'category',
+      'priority',
+      'is_read',
+      'created_at',
+      'formatted_time',
+      'relative_time',
+      'action_url',
+      'resource_type',
+      'resource_id',
+      'read_at',
+      'user_id'
+    ];
+
+    const keys = new Set();
+    for (const n of rows) {
+      if (n && typeof n === 'object') {
+        Object.keys(n).forEach((k) => keys.add(k));
+      }
+    }
+
+    const remaining = Array.from(keys)
+      .filter((k) => !preferredOrder.includes(k))
+      .sort((a, b) => a.localeCompare(b));
+
+    const headers = [...preferredOrder.filter((k) => keys.has(k)), ...remaining];
+
+    const headerLine = headers.map(escapeCsvCell).join(',');
+    const dataLines = rows.map((n) => headers.map((h) => escapeCsvCell(n?.[h])).join(','));
+    return [headerLine, ...dataLines].join('\n');
+  };
+
+  const handleExportCsv = async () => {
+    if (!currentUser || exporting) return;
+
+    setExporting(true);
+    try {
+      const raw = await fetchAllNotificationsForExport();
+      const csv = buildNotificationsCsv(raw);
+      const dateStamp = new Date().toISOString().slice(0, 10);
+      downloadCsv(csv, `notifications_${dateStamp}.csv`);
+    } catch (error) {
+      console.error('Error exporting notifications:', error);
+      alert('Failed to export notifications. Please try again.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const handleMarkAsRead = async (notificationId) => {
     if (!currentUser) return;
 
@@ -134,79 +476,10 @@ const AlertsNotifications = () => {
     }
   };
 
-  // Mock notifications data (fallback)
-  const mockNotifications = [
-    {
-      id: 1,
-      type: 'Compliance',
-      priority: 'Critical',
-      title: 'Insurance Certificate Expired',
-      description: 'Your general liability insurance certificate expired yesterday. Upload new certificate immediately to maintain compliance.',
-      timestamp: '2 hours ago',
-      actions: ['Upload Certificate', 'View Details'],
-      isRead: false,
-        icon: 'fa-solid fa-exclamation-triangle',
-      bgColor: '#fef2f2',
-      borderColor: '#fecaca'
-    },
-    {
-      id: 2,
-      type: 'Loads',
-      priority: 'Info',
-      title: 'Load #FP-2024-001 Delivered',
-      description: 'Driver John Smith successfully delivered load to Chicago, IL. BOL signed and uploaded.',
-      timestamp: '4 hours ago',
-      actions: ['View Load', 'Download BOL'],
-      isRead: false,
-        icon: 'fa-solid fa-box',
-      bgColor: '#eff6ff',
-      borderColor: '#bfdbfe'
-    },
-    {
-      id: 3,
-      type: 'Finance',
-      priority: 'Success',
-      title: 'Invoice #INV-2024-045 Paid',
-      description: 'Payment of $2,850.00 received from ABC Logistics for Load #FP-2024-001.',
-      timestamp: '1 day ago',
-      actions: ['View Invoice', 'Download Receipt'],
-      isRead: true,
-        icon: 'fa-solid fa-dollar-sign',
-      bgColor: '#f0fdf4',
-      borderColor: '#bbf7d0'
-    },
-    {
-      id: 4,
-      type: 'Driver/Dispatch',
-      priority: 'Warning',
-      title: 'HOS Violation Warning',
-      description: 'Driver Mike Johnson approaching 11-hour driving limit. Current: 10.2 hours. Recommend rest stop.',
-      timestamp: '2 days ago',
-      actions: ['Contact Driver', 'View HOS Log'],
-      isRead: true,
-        icon: 'fa-solid fa-user-clock',
-      bgColor: '#fffbeb',
-      borderColor: '#fed7aa'
-    },
-    {
-      id: 5,
-      type: 'System',
-      priority: 'Update',
-      title: 'System Maintenance Complete',
-      description: 'Scheduled maintenance completed successfully. New features include enhanced load tracking and improved mobile app performance.',
-      timestamp: '3 days ago',
-      actions: ['View Release Notes'],
-      isRead: true,
-        icon: 'fa-solid fa-wrench',
-      bgColor: '#faf5ff',
-      borderColor: '#d8b4fe'
-    }
-  ];
-
   const categories = ['All Categories', 'Compliance', 'Loads', 'Finance', 'Driver/Dispatch', 'System'];
   const statuses = ['All Status', 'Unread', 'Read', 'Critical', 'Warning'];
 
-  const displayNotifications = loading ? [] : (notifications.length > 0 ? notifications : mockNotifications);
+  const displayNotifications = loading ? [] : notifications;
 
   const filteredNotifications = displayNotifications.filter(notification => {
     const matchesSearch = notification.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -240,13 +513,9 @@ const AlertsNotifications = () => {
           <p className="alert-header-subtitle">Manage your notifications and alert preferences</p>
         </div>
         <div className="alert-header-actions">
-          <button className="btn small ghost-cd">
+          <button className="btn small ghost-cd" onClick={handleExportCsv} disabled={!currentUser || exporting}>
             <i className="fas fa-download"></i>
-            Export
-          </button>
-          <button className="btn small ghost-cd">
-            <i className="fas fa-cog"></i>
-            Settings
+            {exporting ? 'Exporting...' : 'Export'}
           </button>
         </div>
       </div>
@@ -407,7 +676,12 @@ const AlertsNotifications = () => {
                   </div>
                 </div>
                 <label className="alert-toggle-switch">
-                  <input type="checkbox" defaultChecked />
+                  <input
+                    type="checkbox"
+                    checked={!!categoryToggles.loads}
+                    onChange={(e) => setCategoryToggles(prev => ({ ...prev, loads: e.target.checked }))}
+                    disabled={settingsLoading}
+                  />
                   <span className="alert-slider"></span>
                 </label>
               </div>
@@ -423,7 +697,12 @@ const AlertsNotifications = () => {
                   </div>
                 </div>
                 <label className="alert-toggle-switch">
-                  <input type="checkbox" defaultChecked />
+                  <input
+                    type="checkbox"
+                    checked={!!categoryToggles.compliance_alerts}
+                    onChange={(e) => setCategoryToggles(prev => ({ ...prev, compliance_alerts: e.target.checked }))}
+                    disabled={settingsLoading}
+                  />
                   <span className="alert-slider"></span>
                 </label>
               </div>
@@ -439,7 +718,12 @@ const AlertsNotifications = () => {
                   </div>
                 </div>
                 <label className="alert-toggle-switch">
-                  <input type="checkbox" defaultChecked />
+                  <input
+                    type="checkbox"
+                    checked={!!categoryToggles.finance}
+                    onChange={(e) => setCategoryToggles(prev => ({ ...prev, finance: e.target.checked }))}
+                    disabled={settingsLoading}
+                  />
                   <span className="alert-slider"></span>
                 </label>
               </div>
@@ -455,7 +739,12 @@ const AlertsNotifications = () => {
                   </div>
                 </div>
                 <label className="alert-toggle-switch">
-                  <input type="checkbox" defaultChecked />
+                  <input
+                    type="checkbox"
+                    checked={!!categoryToggles.driver_dispatch}
+                    onChange={(e) => setCategoryToggles(prev => ({ ...prev, driver_dispatch: e.target.checked }))}
+                    disabled={settingsLoading}
+                  />
                   <span className="alert-slider"></span>
                 </label>
               </div>
@@ -471,7 +760,12 @@ const AlertsNotifications = () => {
                   </div>
                 </div>
                 <label className="alert-toggle-switch">
-                  <input type="checkbox" defaultChecked />
+                  <input
+                    type="checkbox"
+                    checked={!!categoryToggles.system}
+                    onChange={(e) => setCategoryToggles(prev => ({ ...prev, system: e.target.checked }))}
+                    disabled={settingsLoading}
+                  />
                   <span className="alert-slider"></span>
                 </label>
               </div>
@@ -508,80 +802,180 @@ const AlertsNotifications = () => {
               <div className="alert-delivery-row">
                 <div className="alert-category-name">Loads</div>
                 <div className="alert-method-checkbox">
-                  <input type="checkbox" defaultChecked />
+                  <input
+                    type="checkbox"
+                    checked={!!deliveryChannels.loads?.in_app}
+                    onChange={(e) => setDeliveryChannels(prev => ({ ...prev, loads: { ...(prev.loads || {}), in_app: e.target.checked } }))}
+                    disabled={settingsLoading}
+                  />
                 </div>
                 <div className="alert-method-checkbox">
-                  <input type="checkbox" defaultChecked />
+                  <input
+                    type="checkbox"
+                    checked={!!deliveryChannels.loads?.email}
+                    onChange={(e) => setDeliveryChannels(prev => ({ ...prev, loads: { ...(prev.loads || {}), email: e.target.checked } }))}
+                    disabled={settingsLoading}
+                  />
                 </div>
                 <div className="alert-method-checkbox">
-                  <input type="checkbox" />
+                  <input
+                    type="checkbox"
+                    checked={!!deliveryChannels.loads?.sms}
+                    onChange={(e) => setDeliveryChannels(prev => ({ ...prev, loads: { ...(prev.loads || {}), sms: e.target.checked } }))}
+                    disabled={settingsLoading}
+                  />
                 </div>
                 <div className="alert-method-checkbox">
-                  <input type="checkbox" defaultChecked />
+                  <input
+                    type="checkbox"
+                    checked={!!deliveryChannels.loads?.push}
+                    onChange={(e) => setDeliveryChannels(prev => ({ ...prev, loads: { ...(prev.loads || {}), push: e.target.checked } }))}
+                    disabled={settingsLoading}
+                  />
                 </div>
               </div>
 
               <div className="alert-delivery-row">
                 <div className="alert-category-name">Compliance</div>
                 <div className="alert-method-checkbox">
-                  <input type="checkbox" defaultChecked />
+                  <input
+                    type="checkbox"
+                    checked={!!deliveryChannels.compliance?.in_app}
+                    onChange={(e) => setDeliveryChannels(prev => ({ ...prev, compliance: { ...(prev.compliance || {}), in_app: e.target.checked } }))}
+                    disabled={settingsLoading}
+                  />
                 </div>
                 <div className="alert-method-checkbox">
-                  <input type="checkbox" defaultChecked />
+                  <input
+                    type="checkbox"
+                    checked={!!deliveryChannels.compliance?.email}
+                    onChange={(e) => setDeliveryChannels(prev => ({ ...prev, compliance: { ...(prev.compliance || {}), email: e.target.checked } }))}
+                    disabled={settingsLoading}
+                  />
                 </div>
                 <div className="alert-method-checkbox">
-                  <input type="checkbox" />
+                  <input
+                    type="checkbox"
+                    checked={!!deliveryChannels.compliance?.sms}
+                    onChange={(e) => setDeliveryChannels(prev => ({ ...prev, compliance: { ...(prev.compliance || {}), sms: e.target.checked } }))}
+                    disabled={settingsLoading}
+                  />
                 </div>
                 <div className="alert-method-checkbox">
-                  <input type="checkbox" />
+                  <input
+                    type="checkbox"
+                    checked={!!deliveryChannels.compliance?.push}
+                    onChange={(e) => setDeliveryChannels(prev => ({ ...prev, compliance: { ...(prev.compliance || {}), push: e.target.checked } }))}
+                    disabled={settingsLoading}
+                  />
                 </div>
               </div>
 
               <div className="alert-delivery-row">
                 <div className="alert-category-name">Finance</div>
                 <div className="alert-method-checkbox">
-                  <input type="checkbox" defaultChecked />
+                  <input
+                    type="checkbox"
+                    checked={!!deliveryChannels.finance?.in_app}
+                    onChange={(e) => setDeliveryChannels(prev => ({ ...prev, finance: { ...(prev.finance || {}), in_app: e.target.checked } }))}
+                    disabled={settingsLoading}
+                  />
                 </div>
                 <div className="alert-method-checkbox">
-                  <input type="checkbox" defaultChecked />
+                  <input
+                    type="checkbox"
+                    checked={!!deliveryChannels.finance?.email}
+                    onChange={(e) => setDeliveryChannels(prev => ({ ...prev, finance: { ...(prev.finance || {}), email: e.target.checked } }))}
+                    disabled={settingsLoading}
+                  />
                 </div>
                 <div className="alert-method-checkbox">
-                  <input type="checkbox" />
+                  <input
+                    type="checkbox"
+                    checked={!!deliveryChannels.finance?.sms}
+                    onChange={(e) => setDeliveryChannels(prev => ({ ...prev, finance: { ...(prev.finance || {}), sms: e.target.checked } }))}
+                    disabled={settingsLoading}
+                  />
                 </div>
                 <div className="alert-method-checkbox">
-                  <input type="checkbox" />
+                  <input
+                    type="checkbox"
+                    checked={!!deliveryChannels.finance?.push}
+                    onChange={(e) => setDeliveryChannels(prev => ({ ...prev, finance: { ...(prev.finance || {}), push: e.target.checked } }))}
+                    disabled={settingsLoading}
+                  />
                 </div>
               </div>
 
               <div className="alert-delivery-row">
                 <div className="alert-category-name">Driver/Dispatch</div>
                 <div className="alert-method-checkbox">
-                  <input type="checkbox" defaultChecked />
+                  <input
+                    type="checkbox"
+                    checked={!!deliveryChannels.driver_dispatch?.in_app}
+                    onChange={(e) => setDeliveryChannels(prev => ({ ...prev, driver_dispatch: { ...(prev.driver_dispatch || {}), in_app: e.target.checked } }))}
+                    disabled={settingsLoading}
+                  />
                 </div>
                 <div className="alert-method-checkbox">
-                  <input type="checkbox" />
+                  <input
+                    type="checkbox"
+                    checked={!!deliveryChannels.driver_dispatch?.email}
+                    onChange={(e) => setDeliveryChannels(prev => ({ ...prev, driver_dispatch: { ...(prev.driver_dispatch || {}), email: e.target.checked } }))}
+                    disabled={settingsLoading}
+                  />
                 </div>
                 <div className="alert-method-checkbox">
-                  <input type="checkbox" />
+                  <input
+                    type="checkbox"
+                    checked={!!deliveryChannels.driver_dispatch?.sms}
+                    onChange={(e) => setDeliveryChannels(prev => ({ ...prev, driver_dispatch: { ...(prev.driver_dispatch || {}), sms: e.target.checked } }))}
+                    disabled={settingsLoading}
+                  />
                 </div>
                 <div className="alert-method-checkbox">
-                  <input type="checkbox" />
+                  <input
+                    type="checkbox"
+                    checked={!!deliveryChannels.driver_dispatch?.push}
+                    onChange={(e) => setDeliveryChannels(prev => ({ ...prev, driver_dispatch: { ...(prev.driver_dispatch || {}), push: e.target.checked } }))}
+                    disabled={settingsLoading}
+                  />
                 </div>
               </div>
 
               <div className="alert-delivery-row">
                 <div className="alert-category-name">System</div>
                 <div className="alert-method-checkbox">
-                  <input type="checkbox" defaultChecked />
+                  <input
+                    type="checkbox"
+                    checked={!!deliveryChannels.system?.in_app}
+                    onChange={(e) => setDeliveryChannels(prev => ({ ...prev, system: { ...(prev.system || {}), in_app: e.target.checked } }))}
+                    disabled={settingsLoading}
+                  />
                 </div>
                 <div className="alert-method-checkbox">
-                  <input type="checkbox" />
+                  <input
+                    type="checkbox"
+                    checked={!!deliveryChannels.system?.email}
+                    onChange={(e) => setDeliveryChannels(prev => ({ ...prev, system: { ...(prev.system || {}), email: e.target.checked } }))}
+                    disabled={settingsLoading}
+                  />
                 </div>
                 <div className="alert-method-checkbox">
-                  <input type="checkbox" />
+                  <input
+                    type="checkbox"
+                    checked={!!deliveryChannels.system?.sms}
+                    onChange={(e) => setDeliveryChannels(prev => ({ ...prev, system: { ...(prev.system || {}), sms: e.target.checked } }))}
+                    disabled={settingsLoading}
+                  />
                 </div>
                 <div className="alert-method-checkbox">
-                  <input type="checkbox" defaultChecked />
+                  <input
+                    type="checkbox"
+                    checked={!!deliveryChannels.system?.push}
+                    onChange={(e) => setDeliveryChannels(prev => ({ ...prev, system: { ...(prev.system || {}), push: e.target.checked } }))}
+                    disabled={settingsLoading}
+                  />
                 </div>
               </div>
               </div>
@@ -595,7 +989,12 @@ const AlertsNotifications = () => {
             
             <div className="alert-quiet-hours-toggle">
               <label className="alert-toggle-switch">
-                <input type="checkbox" defaultChecked />
+                <input
+                  type="checkbox"
+                  checked={!!quietHoursEnabled}
+                  onChange={(e) => setQuietHoursEnabled(e.target.checked)}
+                  disabled={settingsLoading}
+                />
                 <span className="alert-slider"></span>
               </label>
               <span className="alert-toggle-label">Enable Quiet Hours</span>
@@ -605,14 +1004,24 @@ const AlertsNotifications = () => {
               <div className="alert-time-group">
                 <label>Start Time</label>
                 <div className="alert-time-input">
-                  <input type="time" defaultValue="22:00" />
+                  <input
+                    type="time"
+                    value={quietHoursStart}
+                    onChange={(e) => setQuietHoursStart(e.target.value)}
+                    disabled={settingsLoading || !quietHoursEnabled}
+                  />
                 </div>
               </div>
               <div className="alert-time-separator">to</div>
               <div className="alert-time-group">
                 <label>End Time</label>
                 <div className="alert-time-input">
-                  <input type="time" defaultValue="06:00" />
+                  <input
+                    type="time"
+                    value={quietHoursEnd}
+                    onChange={(e) => setQuietHoursEnd(e.target.value)}
+                    disabled={settingsLoading || !quietHoursEnabled}
+                  />
                 </div>
               </div>
             </div>
@@ -630,7 +1039,14 @@ const AlertsNotifications = () => {
             
             <div className="alert-digest-options">
               <label className="alert-digest-option">
-                <input type="radio" name="digest" value="realtime" defaultChecked />
+                <input
+                  type="radio"
+                  name="digest"
+                  value="realtime"
+                  checked={digestFrequency === 'realtime'}
+                  onChange={() => setDigestFrequency('realtime')}
+                  disabled={settingsLoading}
+                />
                 <div className="alert-option-content">
                   <div className="alert-option-icon">
                     <i className="fa-solid fa-bolt"></i>
@@ -643,7 +1059,14 @@ const AlertsNotifications = () => {
               </label>
 
               <label className="alert-digest-option">
-                <input type="radio" name="digest" value="daily" />
+                <input
+                  type="radio"
+                  name="digest"
+                  value="daily"
+                  checked={digestFrequency === 'daily'}
+                  onChange={() => setDigestFrequency('daily')}
+                  disabled={settingsLoading}
+                />
                 <div className="alert-option-content">
                   <div className="alert-option-icon">
                     <i className="fa-solid fa-calendar-day"></i>
@@ -656,7 +1079,14 @@ const AlertsNotifications = () => {
               </label>
 
               <label className="alert-digest-option">
-                <input type="radio" name="digest" value="weekly" />
+                <input
+                  type="radio"
+                  name="digest"
+                  value="weekly"
+                  checked={digestFrequency === 'weekly'}
+                  onChange={() => setDigestFrequency('weekly')}
+                  disabled={settingsLoading}
+                />
                 <div className="alert-option-content">
                   <div className="alert-option-icon">
                     <i className="fa-solid fa-calendar-week"></i>
@@ -677,7 +1107,12 @@ const AlertsNotifications = () => {
             
             <div className="alert-escalation-toggle">
               <label className="alert-toggle-switch">
-                <input type="checkbox" />
+                <input
+                  type="checkbox"
+                  checked={!!escalationRulesEnabled}
+                  onChange={(e) => setEscalationRulesEnabled(e.target.checked)}
+                  disabled={settingsLoading}
+                />
                 <span className="alert-slider"></span>
               </label>
               <span className="alert-toggle-label">Enable Escalation Rules</span>
@@ -692,13 +1127,20 @@ const AlertsNotifications = () => {
             <div className="alert-test-settings">
               <div className="alert-test-notification">
                 <label className="alert-toggle-switch">
-                  <input type="checkbox" />
+                  <input
+                    type="checkbox"
+                    checked={!!testNotificationEnabled}
+                    onChange={(e) => setTestNotificationEnabled(e.target.checked)}
+                    disabled={settingsLoading}
+                  />
                   <span className="alert-slider"></span>
                 </label>
                 <span className="alert-toggle-label">Test Notification</span>
               </div>
 
-              <button className="btn small-cd">Send Test</button>
+              <button className="btn small-cd" onClick={handleSendTestNotification} disabled={settingsLoading || settingsSaving || !testNotificationEnabled}>
+                Send Test
+              </button>
             </div>
 
             <div className="alert-app-settings-note">
@@ -714,10 +1156,25 @@ const AlertsNotifications = () => {
 
           {/* Save Settings Button */}
           <div className="alert-settings-actions">
-            <button className="btn small-cd">
+            <button
+              className="btn small-cd"
+              onClick={() => {
+                if (autoSaveTimerRef.current) {
+                  clearTimeout(autoSaveTimerRef.current);
+                  autoSaveTimerRef.current = null;
+                }
+                saveAlertSettings();
+              }}
+              disabled={settingsLoading || settingsSaving}
+            >
               <i className="fa-solid fa-check"></i>
-              Save Settings
+              {settingsSaving ? 'Saving...' : 'Save Settings'}
             </button>
+            {(settingsLoading || settingsError) && (
+              <div style={{ marginTop: '8px', color: settingsError ? '#b91c1c' : '#6b7280', fontSize: '12px' }}>
+                {settingsLoading ? 'Loading settings...' : settingsError}
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -1,41 +1,118 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import '../../styles/carrier/Settings.css';
 import { useAuth } from '../../contexts/AuthContext';
+import { useUserSettings } from '../../contexts/UserSettingsContext';
 import { API_URL } from '../../config';
 
 export default function Settings() {
   const { currentUser } = useAuth();
+  const { settings: userSettings, patchSettings } = useUserSettings();
   const [activeTab, setActiveTab] = useState('company-profile');
   const [userSearchTerm, setUserSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('All Status');
   const [loginFilter, setLoginFilter] = useState('Last Login');
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
+
+  const [prefsMessage, setPrefsMessage] = useState({ type: '', text: '' });
+  const prefsInFlightRef = useRef(0);
+
+  const [invoicePrefixDraft, setInvoicePrefixDraft] = useState('FPA-');
+  const invoicePrefixTimerRef = useRef(null);
+
+  const logoInputRef = useRef(null);
   const [formData, setFormData] = useState({
     // Company Profile
-    companyName: 'TransLogistics Inc.',
-    phoneNumber: '(555) 123-4567',
-    address: '1234 Freight Ave, Logistics City, TX 75001',
-    email: 'contact@translogistics.com',
+    companyName: '',
+    phoneNumber: '',
+    address: '',
+    email: '',
+    companyLogoUrl: '',
     
     // Federal Information
-    dotNumber: '2847563',
-    mcNumber: '928475',
-    taxId: 'XX-XXXXXXX23',
+    dotNumber: '',
+    mcNumber: '',
+    taxId: '',
     fmcsaSynced: true,
     
     // Banking Information
-    bankName: 'First National Bank',
-    routingNumber: '••••••••123',
-    accountNumber: '••••••••••4567',
+    bankName: '',
+    routingNumber: '',
+    accountNumber: '',
     accountType: 'Business Checking',
     
     // Contact Information
-    dispatchContact: 'dispatch@translogistics.com',
-    safetyContact: 'safety@translogistics.com',
-    billingContact: 'billing@translogistics.com'
+    dispatchContact: '',
+    safetyContact: '',
+    billingContact: ''
   });
+
+  const disabledTabKeys = useMemo(
+    () => new Set(['user-management', 'roles-permissions', 'security', 'api-webhooks']),
+    []
+  );
+
+  const setPrefBusy = (isBusy) => {
+    // ref-counted busy state so rapid updates don't flicker
+    if (!isBusy) {
+      prefsInFlightRef.current = Math.max(0, prefsInFlightRef.current - 1);
+      if (prefsInFlightRef.current === 0) {
+        setTimeout(() => {
+          setPrefsMessage((m) => (m?.type === 'success' ? { type: '', text: '' } : m));
+        }, 1500);
+      }
+      return;
+    }
+    prefsInFlightRef.current += 1;
+  };
+
+  const updatePrefs = async (partial) => {
+    try {
+      setPrefsMessage({ type: '', text: '' });
+      setPrefBusy(true);
+      await patchSettings(partial, { requestLabel: 'PATCH /auth/settings (carrier preferences)' });
+      setPrefsMessage({ type: 'success', text: 'Preferences saved.' });
+    } catch (e) {
+      console.error(e);
+      setPrefsMessage({ type: 'error', text: e?.message || 'Failed to save preferences' });
+    } finally {
+      setPrefBusy(false);
+    }
+  };
+
+  // Keep invoice prefix draft in sync with remote settings.
+  useEffect(() => {
+    const next = String(prefVal('invoice_prefix', 'FPA-') || 'FPA-');
+    setInvoicePrefixDraft(next);
+  }, [userSettings?.invoice_prefix]);
+
+  const prefVal = (key, fallback) => {
+    const v = userSettings?.[key];
+    return (v === undefined || v === null || v === '') ? fallback : v;
+  };
+
+  const notificationChannels = useMemo(() => {
+    const nc = userSettings?.notification_channels;
+    if (nc && typeof nc === 'object') return nc;
+    return {
+      loads: { in_app: true, email: true, sms: false },
+      compliance: { in_app: true, email: true, sms: true },
+      finance: { in_app: true, email: true, sms: false },
+    };
+  }, [userSettings?.notification_channels]);
+
+  const updateNotificationChannel = (category, channel, enabled) => {
+    const next = {
+      ...notificationChannels,
+      [category]: {
+        ...(notificationChannels?.[category] || {}),
+        [channel]: Boolean(enabled),
+      },
+    };
+    updatePrefs({ notification_channels: next });
+  };
 
   useEffect(() => {
     const run = async () => {
@@ -58,12 +135,14 @@ export default function Settings() {
         const d = data?.data || {};
         setFormData(prev => ({
           ...prev,
-          companyName: d.companyName || prev.companyName || '',
-          phoneNumber: d.phone || prev.phoneNumber || '',
-          address: d.address || prev.address || '',
-          email: d.email || prev.email || '',
-          dotNumber: d.dotNumber || prev.dotNumber || '',
-          mcNumber: d.mcNumber || prev.mcNumber || '',
+          companyName: (d.companyName ?? ''),
+          phoneNumber: (d.phone ?? ''),
+          address: (d.address ?? ''),
+          email: (d.companyEmail ?? d.email ?? ''),
+          companyLogoUrl: (d.companyLogoUrl ?? ''),
+          dotNumber: (d.dotNumber ?? ''),
+          mcNumber: (d.mcNumber ?? ''),
+          taxId: (d.taxId ?? ''),
         }));
       } catch (e) {
         console.error(e);
@@ -272,6 +351,11 @@ export default function Settings() {
         mcNumber: formData.mcNumber,
         phone: formData.phoneNumber,
         address: formData.address,
+
+        // Extended company profile fields
+        companyEmail: formData.email,
+        taxId: formData.taxId,
+        companyLogoUrl: formData.companyLogoUrl,
       };
 
       const resp = await fetch(`${API_URL}/onboarding/update-profile`, {
@@ -301,12 +385,14 @@ export default function Settings() {
         const d = refetchData?.data || {};
         setFormData(prev => ({
           ...prev,
-          companyName: d.companyName || prev.companyName || '',
-          phoneNumber: d.phone || prev.phoneNumber || '',
-          address: d.address || prev.address || '',
-          email: d.email || prev.email || '',
-          dotNumber: d.dotNumber || prev.dotNumber || '',
-          mcNumber: d.mcNumber || prev.mcNumber || '',
+          companyName: (d.companyName ?? prev.companyName ?? ''),
+          phoneNumber: (d.phone ?? prev.phoneNumber ?? ''),
+          address: (d.address ?? prev.address ?? ''),
+          email: (d.companyEmail ?? d.email ?? prev.email ?? ''),
+          companyLogoUrl: (d.companyLogoUrl ?? prev.companyLogoUrl ?? ''),
+          dotNumber: (d.dotNumber ?? prev.dotNumber ?? ''),
+          mcNumber: (d.mcNumber ?? prev.mcNumber ?? ''),
+          taxId: (d.taxId ?? prev.taxId ?? ''),
         }));
       }
     } catch (e) {
@@ -319,8 +405,45 @@ export default function Settings() {
   };
 
   const handleUploadLogo = () => {
-    console.log('Upload logo functionality');
-    // Implementation for logo upload
+    if (uploadingLogo || savingProfile) return;
+    logoInputRef.current?.click();
+  };
+
+  const onLogoSelected = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentUser) return;
+    try {
+      setUploadingLogo(true);
+      setMessage({ type: '', text: '' });
+      const token = await currentUser.getIdToken();
+
+      const fd = new FormData();
+      fd.append('file', file);
+
+      const resp = await fetch(`${API_URL}/onboarding/company-logo`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data?.detail || 'Failed to upload logo');
+
+      const url = data?.company_logo_url || data?.companyLogoUrl || data?.url;
+      if (url) {
+        setFormData((prev) => ({ ...prev, companyLogoUrl: url }));
+        setMessage({ type: 'success', text: 'Company logo uploaded successfully.' });
+        setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+      } else {
+        setMessage({ type: 'error', text: 'Upload succeeded but no logo URL returned' });
+      }
+    } catch (err) {
+      console.error(err);
+      setMessage({ type: 'error', text: err?.message || 'Failed to upload logo' });
+    } finally {
+      setUploadingLogo(false);
+      try { e.target.value = ''; } catch {}
+    }
   };
 
   return (
@@ -339,7 +462,13 @@ export default function Settings() {
             <button
               key={tab.key}
               className={`marketplace-tab ${activeTab === tab.key ? 'active' : ''}`}
-              onClick={() => setActiveTab(tab.key)}
+              onClick={() => {
+                if (disabledTabKeys.has(tab.key)) return;
+                setActiveTab(tab.key);
+              }}
+              disabled={disabledTabKeys.has(tab.key)}
+              aria-disabled={disabledTabKeys.has(tab.key)}
+              title={disabledTabKeys.has(tab.key) ? 'This section is currently disabled' : tab.label}
             >
               {tab.label}
             </button>
@@ -457,6 +586,7 @@ export default function Settings() {
                 </div>
 
                 {/* Banking Information */}
+                {/*
                 <div className="settings-section">
                   <h3 className="section-title">Banking Information</h3>
                   <div className="form-grid">
@@ -497,6 +627,7 @@ export default function Settings() {
                     </div>
                   </div>
                 </div>
+                */}
               </div>
 
               {/* Right Column */}
@@ -506,10 +637,25 @@ export default function Settings() {
                   <h3 className="section-title">Company Logo</h3>
                   <div className="logo-upload-section">
                     <div className="logo-preview">
-                      <i className="fa-solid fa-building logo-placeholder"></i>
+                      {formData.companyLogoUrl ? (
+                        <img
+                          src={formData.companyLogoUrl}
+                          alt="Company logo"
+                          style={{ width: 72, height: 72, borderRadius: 14, objectFit: 'cover' }}
+                        />
+                      ) : (
+                        <i className="fa-solid fa-building logo-placeholder"></i>
+                      )}
                     </div>
-                    <button className="btn small ghost-cd" onClick={handleUploadLogo}>
-                      Upload Logo
+                    <input
+                      ref={logoInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
+                      style={{ display: 'none' }}
+                      onChange={onLogoSelected}
+                    />
+                    <button className="btn small ghost-cd" onClick={handleUploadLogo} disabled={uploadingLogo}>
+                      {uploadingLogo ? 'Uploading…' : 'Upload Logo'}
                     </button>
                     <p className="upload-help">PNG, JPG up to 5MB</p>
                   </div>
@@ -520,27 +666,11 @@ export default function Settings() {
                   <h3 className="section-title">Contact Information</h3>
                   <div className="contact-info">
                     <div className="contact-item">
-                      <label>Dispatch Contact</label>
+                      <label>Carrier Email</label>
                       <input
                         type="email"
-                        value={formData.dispatchContact}
-                        onChange={(e) => handleInputChange('dispatchContact', e.target.value)}
-                      />
-                    </div>
-                    <div className="contact-item">
-                      <label>Safety Contact</label>
-                      <input
-                        type="email"
-                        value={formData.safetyContact}
-                        onChange={(e) => handleInputChange('safetyContact', e.target.value)}
-                      />
-                    </div>
-                    <div className="contact-item">
-                      <label>Billing Contact</label>
-                      <input
-                        type="email"
-                        value={formData.billingContact}
-                        onChange={(e) => handleInputChange('billingContact', e.target.value)}
+                        value={formData.email}
+                        onChange={(e) => handleInputChange('email', e.target.value)}
                       />
                     </div>
                   </div>
@@ -1450,6 +1580,25 @@ export default function Settings() {
         {activeTab === 'preferences' && (
           <div className="tab-panel">
 
+            {prefsMessage.text && (
+              <div
+                className={`profile-message ${prefsMessage.type}`}
+                style={{
+                  padding: '10px 14px',
+                  marginBottom: '12px',
+                  borderRadius: '8px',
+                  backgroundColor: prefsMessage.type === 'success' ? '#d1fae5' : '#fee2e2',
+                  color: prefsMessage.type === 'success' ? '#065f46' : '#991b1b',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+              >
+                <i className={`fa-solid ${prefsMessage.type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'}`}></i>
+                {prefsMessage.text}
+              </div>
+            )}
+
             {/* Language & Localization */}
             <div className="preferences-card">
               <h3> Language & Localization</h3>
@@ -1461,7 +1610,10 @@ export default function Settings() {
                     <label>Default Language</label>
                   </div>
                   <div className="locale-select">
-                    <select defaultValue="English">
+                    <select
+                      value={prefVal('language', 'English')}
+                      onChange={(e) => updatePrefs({ language: e.target.value })}
+                    >
                       <option>English</option>
                       <option>Spanish</option>
                       <option>French</option>
@@ -1474,7 +1626,19 @@ export default function Settings() {
                     <label>Date Format</label>
                   </div>
                   <div className="locale-select">
-                    <select defaultValue="MM/DD/YYYY">
+                    <select
+                      value={(() => {
+                        const df = String(prefVal('date_format', 'mdy')).toLowerCase();
+                        if (df === 'dmy') return 'DD/MM/YYYY';
+                        if (df === 'ymd') return 'YYYY-MM-DD';
+                        return 'MM/DD/YYYY';
+                      })()}
+                      onChange={(e) => {
+                        const v = String(e.target.value || 'MM/DD/YYYY');
+                        const df = v === 'DD/MM/YYYY' ? 'dmy' : v === 'YYYY-MM-DD' ? 'ymd' : 'mdy';
+                        updatePrefs({ date_format: df });
+                      }}
+                    >
                       <option>MM/DD/YYYY</option>
                       <option>DD/MM/YYYY</option>
                       <option>YYYY-MM-DD</option>
@@ -1487,7 +1651,10 @@ export default function Settings() {
                     <label>Time Zone</label>
                   </div>
                   <div className="locale-select">
-                    <select defaultValue="Eastern Time (ET)">
+                    <select
+                      value={prefVal('time_zone', 'Eastern Time (ET)')}
+                      onChange={(e) => updatePrefs({ time_zone: e.target.value })}
+                    >
                       <option>Eastern Time (ET)</option>
                       <option>Central Time (CT)</option>
                       <option>Mountain Time (MT)</option>
@@ -1501,10 +1668,13 @@ export default function Settings() {
                     <label>Currency</label>
                   </div>
                   <div className="locale-select">
-                    <select defaultValue="USD">
-                      <option>USD</option>
-                      <option>CAD</option>
-                      <option>EUR</option>
+                    <select
+                      value={prefVal('default_currency', 'USD')}
+                      onChange={(e) => updatePrefs({ default_currency: e.target.value })}
+                    >
+                      <option value="USD">USD</option>
+                      <option value="CAD">CAD</option>
+                      <option value="EUR">EUR</option>
                     </select>
                   </div>
                 </div>
@@ -1529,39 +1699,75 @@ export default function Settings() {
                     <div className="notification-row">
                       <div className="category-name">Loads</div>
                       <div className="channel-checkbox">
-                        <input type="checkbox" defaultChecked />
+                        <input
+                          type="checkbox"
+                          checked={Boolean(notificationChannels?.loads?.in_app)}
+                          onChange={(e) => updateNotificationChannel('loads', 'in_app', e.target.checked)}
+                        />
                       </div>
                       <div className="channel-checkbox">
-                        <input type="checkbox" defaultChecked />
+                        <input
+                          type="checkbox"
+                          checked={Boolean(notificationChannels?.loads?.email)}
+                          onChange={(e) => updateNotificationChannel('loads', 'email', e.target.checked)}
+                        />
                       </div>
                       <div className="channel-checkbox">
-                        <input type="checkbox" />
+                        <input
+                          type="checkbox"
+                          checked={Boolean(notificationChannels?.loads?.sms)}
+                          onChange={(e) => updateNotificationChannel('loads', 'sms', e.target.checked)}
+                        />
                       </div>
                     </div>
 
                     <div className="notification-row">
                       <div className="category-name">Compliance</div>
                       <div className="channel-checkbox">
-                        <input type="checkbox" defaultChecked />
+                        <input
+                          type="checkbox"
+                          checked={Boolean(notificationChannels?.compliance?.in_app)}
+                          onChange={(e) => updateNotificationChannel('compliance', 'in_app', e.target.checked)}
+                        />
                       </div>
                       <div className="channel-checkbox">
-                        <input type="checkbox" defaultChecked />
+                        <input
+                          type="checkbox"
+                          checked={Boolean(notificationChannels?.compliance?.email)}
+                          onChange={(e) => updateNotificationChannel('compliance', 'email', e.target.checked)}
+                        />
                       </div>
                       <div className="channel-checkbox">
-                        <input type="checkbox" defaultChecked />
+                        <input
+                          type="checkbox"
+                          checked={Boolean(notificationChannels?.compliance?.sms)}
+                          onChange={(e) => updateNotificationChannel('compliance', 'sms', e.target.checked)}
+                        />
                       </div>
                     </div>
 
                     <div className="notification-row">
                       <div className="category-name">Finance</div>
                       <div className="channel-checkbox">
-                        <input type="checkbox" defaultChecked />
+                        <input
+                          type="checkbox"
+                          checked={Boolean(notificationChannels?.finance?.in_app)}
+                          onChange={(e) => updateNotificationChannel('finance', 'in_app', e.target.checked)}
+                        />
                       </div>
                       <div className="channel-checkbox">
-                        <input type="checkbox" defaultChecked />
+                        <input
+                          type="checkbox"
+                          checked={Boolean(notificationChannels?.finance?.email)}
+                          onChange={(e) => updateNotificationChannel('finance', 'email', e.target.checked)}
+                        />
                       </div>
                       <div className="channel-checkbox">
-                        <input type="checkbox" />
+                        <input
+                          type="checkbox"
+                          checked={Boolean(notificationChannels?.finance?.sms)}
+                          onChange={(e) => updateNotificationChannel('finance', 'sms', e.target.checked)}
+                        />
                       </div>
                     </div>
                   </div>
@@ -1575,13 +1781,19 @@ export default function Settings() {
                 <div className="quiet-hours-content">
                   <span>No notifications during these hours</span>
                   <div className="time-selectors">
-                    <select defaultValue="10:00 PM">
+                    <select
+                      value={prefVal('quiet_hours_start', '10:00 PM')}
+                      onChange={(e) => updatePrefs({ quiet_hours_start: e.target.value })}
+                    >
                       <option>9:00 PM</option>
                       <option>10:00 PM</option>
                       <option>11:00 PM</option>
                     </select>
                     <span>to</span>
-                    <select defaultValue="7:00 AM">
+                    <select
+                      value={prefVal('quiet_hours_end', '7:00 AM')}
+                      onChange={(e) => updatePrefs({ quiet_hours_end: e.target.value })}
+                    >
                       <option>6:00 AM</option>
                       <option>7:00 AM</option>
                       <option>8:00 AM</option>
@@ -1602,7 +1814,22 @@ export default function Settings() {
                     <label>Invoice Prefix</label>
                   </div>
                   <div className="finance-input">
-                    <input type="text" defaultValue="FPA-" />
+                    <input
+                      type="text"
+                      value={invoicePrefixDraft}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setInvoicePrefixDraft(v);
+                        if (invoicePrefixTimerRef.current) clearTimeout(invoicePrefixTimerRef.current);
+                        invoicePrefixTimerRef.current = setTimeout(() => {
+                          updatePrefs({ invoice_prefix: v });
+                        }, 600);
+                      }}
+                      onBlur={() => {
+                        if (invoicePrefixTimerRef.current) clearTimeout(invoicePrefixTimerRef.current);
+                        updatePrefs({ invoice_prefix: invoicePrefixDraft });
+                      }}
+                    />
                   </div>
                 </div>
 
@@ -1611,7 +1838,10 @@ export default function Settings() {
                     <label>Numbering Format</label>
                   </div>
                   <div className="finance-select">
-                    <select defaultValue="Sequential">
+                    <select
+                      value={prefVal('invoice_numbering_format', 'Sequential')}
+                      onChange={(e) => updatePrefs({ invoice_numbering_format: e.target.value })}
+                    >
                       <option>Sequential</option>
                       <option>Date-based</option>
                       <option>Custom</option>
@@ -1624,7 +1854,10 @@ export default function Settings() {
                     <label>Payment Terms</label>
                   </div>
                   <div className="finance-select">
-                    <select defaultValue="Net 30">
+                    <select
+                      value={prefVal('payment_terms', 'Net 30')}
+                      onChange={(e) => updatePrefs({ payment_terms: e.target.value })}
+                    >
                       <option>Net 15</option>
                       <option>Net 30</option>
                       <option>Net 45</option>
@@ -1638,10 +1871,13 @@ export default function Settings() {
                     <label>Default Currency</label>
                   </div>
                   <div className="finance-select">
-                    <select defaultValue="USD">
-                      <option>USD</option>
-                      <option>CAD</option>
-                      <option>EUR</option>
+                    <select
+                      value={prefVal('default_currency', 'USD')}
+                      onChange={(e) => updatePrefs({ default_currency: e.target.value })}
+                    >
+                      <option value="USD">USD</option>
+                      <option value="CAD">CAD</option>
+                      <option value="EUR">EUR</option>
                     </select>
                   </div>
                 </div>
@@ -1649,7 +1885,11 @@ export default function Settings() {
 
               <div className="finance-checkbox">
                 <label className="checkbox-label">
-                  <input type="checkbox" />
+                  <input
+                    type="checkbox"
+                    checked={Boolean(prefVal('auto_send_invoices_on_complete', false))}
+                    onChange={(e) => updatePrefs({ auto_send_invoices_on_complete: e.target.checked })}
+                  />
                   Auto-send invoices when loads are completed
                 </label>
               </div>
@@ -1666,7 +1906,10 @@ export default function Settings() {
                     <label>Theme</label>
                   </div>
                   <div className="dashboard-select">
-                    <select defaultValue="Light">
+                    <select
+                      value={prefVal('theme_preference', 'Light')}
+                      onChange={(e) => updatePrefs({ theme_preference: e.target.value })}
+                    >
                       <option>Light</option>
                       <option>Dark</option>
                       <option>Auto</option>
@@ -1679,7 +1922,10 @@ export default function Settings() {
                     <label>Default View</label>
                   </div>
                   <div className="dashboard-select">
-                    <select defaultValue="My Loads Default View">
+                    <select
+                      value={prefVal('default_view', 'My Loads Default View')}
+                      onChange={(e) => updatePrefs({ default_view: e.target.value })}
+                    >
                       <option>My Loads Default View</option>
                       <option>Dashboard Overview</option>
                       <option>Analytics</option>
@@ -1692,7 +1938,10 @@ export default function Settings() {
                     <label>My Loads Default View</label>
                   </div>
                   <div className="dashboard-select">
-                    <select defaultValue="Active">
+                    <select
+                      value={prefVal('my_loads_default_view', 'Active')}
+                      onChange={(e) => updatePrefs({ my_loads_default_view: e.target.value })}
+                    >
                       <option>Active</option>
                       <option>Completed</option>
                       <option>All Loads</option>
@@ -1709,12 +1958,20 @@ export default function Settings() {
               
               <div className="document-checkboxes">
                 <label className="checkbox-label">
-                  <input type="checkbox" defaultChecked />
+                  <input
+                    type="checkbox"
+                    checked={Boolean(prefVal('auto_categorize_documents', true))}
+                    onChange={(e) => updatePrefs({ auto_categorize_documents: e.target.checked })}
+                  />
                   Auto-categorize documents (BOLs, Invoices, Load Agreements)
                 </label>
                 
                 <label className="checkbox-label">
-                  <input type="checkbox" />
+                  <input
+                    type="checkbox"
+                    checked={Boolean(prefVal('auto_archive_completed_documents', false))}
+                    onChange={(e) => updatePrefs({ auto_archive_completed_documents: e.target.checked })}
+                  />
                   Auto-archive completed documents
                 </label>
               </div>

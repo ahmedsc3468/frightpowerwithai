@@ -1854,6 +1854,9 @@ async def get_user_settings(user: Dict[str, Any] = Depends(get_current_user)):
     notif = user.get("notification_preferences")
     if not isinstance(notif, dict):
         notif = {}
+    digest_frequency = str(user.get("digest_frequency") or "").strip().lower() or "realtime"
+    if digest_frequency not in {"realtime", "daily", "weekly"}:
+        digest_frequency = "realtime"
     payload = {
         "language": user.get("language"),
         "time_zone": user.get("time_zone"),
@@ -1861,6 +1864,8 @@ async def get_user_settings(user: Dict[str, Any] = Depends(get_current_user)):
         "start_dashboard_view": user.get("start_dashboard_view") or "dashboard",
         "auto_save_edits": user.get("auto_save_edits", True) is not False,
         "email_digest_enabled": user.get("email_digest_enabled", True) is not False,
+        "digest_frequency": digest_frequency,
+        "escalation_rules_enabled": bool(user.get("escalation_rules_enabled") is True),
 
         # Driver/Carrier preferences
         "notification_preferences": notif,
@@ -1871,6 +1876,24 @@ async def get_user_settings(user: Dict[str, Any] = Depends(get_current_user)):
         "font_size": user.get("font_size") or "Medium",
         "high_contrast_mode": bool(user.get("high_contrast_mode") is True),
         "screen_reader_compatible": bool(user.get("screen_reader_compatible", True) is not False),
+
+        # Extended Preferences
+        "default_currency": user.get("default_currency") or "USD",
+        "notification_channels": user.get("notification_channels") or {},
+        "quiet_hours_start": user.get("quiet_hours_start"),
+        "quiet_hours_end": user.get("quiet_hours_end"),
+
+        "invoice_prefix": user.get("invoice_prefix"),
+        "invoice_numbering_format": user.get("invoice_numbering_format"),
+        "payment_terms": user.get("payment_terms"),
+        "auto_send_invoices_on_complete": bool(user.get("auto_send_invoices_on_complete") is True),
+
+        "theme_preference": user.get("theme_preference"),
+        "default_view": user.get("default_view"),
+        "my_loads_default_view": user.get("my_loads_default_view"),
+
+        "auto_categorize_documents": bool(user.get("auto_categorize_documents", True) is not False),
+        "auto_archive_completed_documents": bool(user.get("auto_archive_completed_documents") is True),
     }
     return UserSettings(**payload)
 
@@ -1889,7 +1912,7 @@ async def update_user_settings(
 
     if "date_format" in update_data:
         df = str(update_data.get("date_format") or "").strip().lower()
-        if df not in {"mdy", "dmy"}:
+        if df not in {"mdy", "dmy", "ymd"}:
             raise HTTPException(status_code=400, detail="Invalid date_format")
         update_data["date_format"] = df
 
@@ -1911,6 +1934,72 @@ async def update_user_settings(
         else:
             # Normalize values to bool
             update_data["notification_preferences"] = {str(k): bool(v) for k, v in prefs.items()}
+
+    if "digest_frequency" in update_data:
+        df = str(update_data.get("digest_frequency") or "").strip().lower() or "realtime"
+        if df not in {"realtime", "daily", "weekly"}:
+            raise HTTPException(status_code=400, detail="Invalid digest_frequency")
+        update_data["digest_frequency"] = df
+        # Keep the legacy bool in sync so other parts of the app remain consistent.
+        update_data["email_digest_enabled"] = (df != "realtime")
+
+    if "escalation_rules_enabled" in update_data:
+        update_data["escalation_rules_enabled"] = bool(update_data.get("escalation_rules_enabled") is True)
+
+    if "default_currency" in update_data:
+        update_data["default_currency"] = str(update_data.get("default_currency") or "USD").strip().upper() or "USD"
+
+    if "notification_channels" in update_data:
+        chans = update_data.get("notification_channels")
+        if chans is None:
+            update_data["notification_channels"] = {}
+        elif not isinstance(chans, dict):
+            raise HTTPException(status_code=400, detail="Invalid notification_channels")
+        else:
+            normalized: Dict[str, Dict[str, bool]] = {}
+            for cat, cat_val in chans.items():
+                if not isinstance(cat_val, dict):
+                    continue
+                normalized[str(cat)] = {
+                    "in_app": bool(cat_val.get("in_app") is True),
+                    "email": bool(cat_val.get("email") is True),
+                    "sms": bool(cat_val.get("sms") is True),
+                    "push": bool(cat_val.get("push") is True),
+                }
+            update_data["notification_channels"] = normalized
+
+    if "quiet_hours_start" in update_data:
+        update_data["quiet_hours_start"] = str(update_data.get("quiet_hours_start") or "").strip() or None
+
+    if "quiet_hours_end" in update_data:
+        update_data["quiet_hours_end"] = str(update_data.get("quiet_hours_end") or "").strip() or None
+
+    if "invoice_prefix" in update_data:
+        update_data["invoice_prefix"] = str(update_data.get("invoice_prefix") or "").strip() or None
+
+    if "invoice_numbering_format" in update_data:
+        update_data["invoice_numbering_format"] = str(update_data.get("invoice_numbering_format") or "").strip() or None
+
+    if "payment_terms" in update_data:
+        update_data["payment_terms"] = str(update_data.get("payment_terms") or "").strip() or None
+
+    if "auto_send_invoices_on_complete" in update_data:
+        update_data["auto_send_invoices_on_complete"] = bool(update_data.get("auto_send_invoices_on_complete") is True)
+
+    if "theme_preference" in update_data:
+        update_data["theme_preference"] = str(update_data.get("theme_preference") or "").strip() or None
+
+    if "default_view" in update_data:
+        update_data["default_view"] = str(update_data.get("default_view") or "").strip() or None
+
+    if "my_loads_default_view" in update_data:
+        update_data["my_loads_default_view"] = str(update_data.get("my_loads_default_view") or "").strip() or None
+
+    if "auto_categorize_documents" in update_data:
+        update_data["auto_categorize_documents"] = bool(update_data.get("auto_categorize_documents") is True)
+
+    if "auto_archive_completed_documents" in update_data:
+        update_data["auto_archive_completed_documents"] = bool(update_data.get("auto_archive_completed_documents") is True)
 
     if "calendar_reminders_enabled" in update_data:
         update_data["calendar_reminders_enabled"] = bool(update_data.get("calendar_reminders_enabled") is True)
@@ -1941,6 +2030,8 @@ async def update_user_settings(
         "start_dashboard_view": merged.get("start_dashboard_view") or "dashboard",
         "auto_save_edits": merged.get("auto_save_edits", True) is not False,
         "email_digest_enabled": merged.get("email_digest_enabled", True) is not False,
+        "digest_frequency": str(merged.get("digest_frequency") or "").strip().lower() or "realtime",
+        "escalation_rules_enabled": bool(merged.get("escalation_rules_enabled") is True),
 
         "notification_preferences": notif,
         "calendar_sync": merged.get("calendar_sync"),
@@ -1949,6 +2040,23 @@ async def update_user_settings(
         "font_size": merged.get("font_size") or "Medium",
         "high_contrast_mode": bool(merged.get("high_contrast_mode") is True),
         "screen_reader_compatible": bool(merged.get("screen_reader_compatible", True) is not False),
+
+        "default_currency": merged.get("default_currency") or "USD",
+        "notification_channels": merged.get("notification_channels") or {},
+        "quiet_hours_start": merged.get("quiet_hours_start"),
+        "quiet_hours_end": merged.get("quiet_hours_end"),
+
+        "invoice_prefix": merged.get("invoice_prefix"),
+        "invoice_numbering_format": merged.get("invoice_numbering_format"),
+        "payment_terms": merged.get("payment_terms"),
+        "auto_send_invoices_on_complete": bool(merged.get("auto_send_invoices_on_complete") is True),
+
+        "theme_preference": merged.get("theme_preference"),
+        "default_view": merged.get("default_view"),
+        "my_loads_default_view": merged.get("my_loads_default_view"),
+
+        "auto_categorize_documents": bool(merged.get("auto_categorize_documents", True) is not False),
+        "auto_archive_completed_documents": bool(merged.get("auto_archive_completed_documents") is True),
     }
     return UserSettings(**payload)
 

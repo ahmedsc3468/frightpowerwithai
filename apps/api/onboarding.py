@@ -1,10 +1,11 @@
 # File: apps/api/onboarding.py
 """Onboarding router for manual onboarding and account creation endpoints."""
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from typing import Dict, Any, List, Optional
 import json
 import time
 import hashlib
+import uuid
 from datetime import datetime, timedelta
 
 from firebase_admin import firestore
@@ -325,25 +326,51 @@ async def get_onboarding_data(
     except Exception as e:
         print(f"Warning: failed to compute consent summary: {e}")
 
+    # Always read fresh user doc so Settings reflects saved changes immediately.
+    uid = str(user.get("uid") or "")
+    try:
+        snap = db.collection("users").document(uid).get() if uid else None
+        user_doc = (snap.to_dict() or {}) if (snap and getattr(snap, "exists", False)) else {}
+    except Exception:
+        user_doc = {}
+
+    # Prefer Firestore document values over the cached auth payload.
+    resolved_user = {**(user or {}), **(user_doc or {})}
+    company_profile = resolved_user.get("company_profile") if isinstance(resolved_user.get("company_profile"), dict) else {}
+    banking = company_profile.get("banking") if isinstance(company_profile.get("banking"), dict) else {}
+    contacts = company_profile.get("contacts") if isinstance(company_profile.get("contacts"), dict) else {}
+
     return {
         "data": {
-            "email": user.get("email"),
-            "fullName": user.get("name") or user.get("full_name"),
-            "firstName": user.get("first_name"),
-            "lastName": user.get("last_name"),
-            "companyName": user.get("company_name"),
-            "dotNumber": user.get("dot_number"),
-            "mcNumber": user.get("mc_number"),
-            "phone": user.get("phone"),
-            "address": user.get("address"),
-            "role": user.get("role", "carrier"),
-            "profile_picture_url": user.get("profile_picture_url"),
-            "emergency_contact_name": user.get("emergency_contact_name"),
-            "emergency_contact_relationship": user.get("emergency_contact_relationship"),
-            "emergency_contact_phone": user.get("emergency_contact_phone"),
-            "onboarding_completed": user.get("onboarding_completed", False),
-            "onboarding_step": user.get("onboarding_step", "WELCOME"),
-            "onboarding_score": user.get("onboarding_score", 0),
+            "email": resolved_user.get("email"),
+            "fullName": resolved_user.get("name") or resolved_user.get("full_name"),
+            "firstName": resolved_user.get("first_name"),
+            "lastName": resolved_user.get("last_name"),
+            "companyName": resolved_user.get("company_name"),
+            "dotNumber": resolved_user.get("dot_number"),
+            "mcNumber": resolved_user.get("mc_number"),
+            "phone": resolved_user.get("phone"),
+            "address": resolved_user.get("address"),
+            "role": resolved_user.get("role", "carrier"),
+            "profile_picture_url": resolved_user.get("profile_picture_url"),
+            "emergency_contact_name": resolved_user.get("emergency_contact_name"),
+            "emergency_contact_relationship": resolved_user.get("emergency_contact_relationship"),
+            "emergency_contact_phone": resolved_user.get("emergency_contact_phone"),
+            "onboarding_completed": resolved_user.get("onboarding_completed", False),
+            "onboarding_step": resolved_user.get("onboarding_step", "WELCOME"),
+            "onboarding_score": resolved_user.get("onboarding_score", 0),
+
+            # Company Profile (extended)
+            "companyEmail": company_profile.get("company_email"),
+            "taxId": company_profile.get("tax_id"),
+            "companyLogoUrl": company_profile.get("company_logo_url") or resolved_user.get("company_logo_url"),
+            "bankName": banking.get("bank_name"),
+            "routingNumber": banking.get("routing_number"),
+            "accountNumber": banking.get("account_number"),
+            "accountType": banking.get("account_type"),
+            "dispatchContact": contacts.get("dispatch_contact"),
+            "safetyContact": contacts.get("safety_contact"),
+            "billingContact": contacts.get("billing_contact"),
 
             # Common carrier onboarding fields (may be absent)
             "fleetSize": fleet_size,
@@ -590,7 +617,10 @@ async def update_profile_with_data(
         before = (user_ref.get().to_dict() or {})
         
         # Build update from provided data
-        update_data = {"updated_at": time.time()}
+        update_data: Dict[str, Any] = {"updated_at": time.time()}
+        company_patch: Dict[str, Any] = {}
+        banking_patch: Dict[str, Any] = {}
+        contacts_patch: Dict[str, Any] = {}
         
         # Map common field names
         field_mapping = {
@@ -602,6 +632,7 @@ async def update_profile_with_data(
             "lastName": "last_name",
             "phone": "phone",
             "cdlNumber": "cdl_number",
+            "address": "address",
         }
         
         for frontend_field, db_field in field_mapping.items():
@@ -610,6 +641,50 @@ async def update_profile_with_data(
                     update_data[db_field] = _normalize_identifier(data[frontend_field])
                 else:
                     update_data[db_field] = data[frontend_field]
+
+        # Extended company profile fields stored under company_profile
+        if "companyEmail" in data:
+            v = str(data.get("companyEmail") or "").strip()
+            company_patch["company_email"] = v or None
+
+        if "taxId" in data:
+            v = str(data.get("taxId") or "").strip()
+            company_patch["tax_id"] = v or None
+
+        if "bankName" in data:
+            v = str(data.get("bankName") or "").strip()
+            banking_patch["bank_name"] = v or None
+
+        if "routingNumber" in data:
+            v = str(data.get("routingNumber") or "").strip()
+            banking_patch["routing_number"] = v or None
+
+        if "accountNumber" in data:
+            v = str(data.get("accountNumber") or "").strip()
+            banking_patch["account_number"] = v or None
+
+        if "accountType" in data:
+            v = str(data.get("accountType") or "").strip()
+            banking_patch["account_type"] = v or None
+
+        if "dispatchContact" in data:
+            v = str(data.get("dispatchContact") or "").strip()
+            contacts_patch["dispatch_contact"] = v or None
+
+        if "safetyContact" in data:
+            v = str(data.get("safetyContact") or "").strip()
+            contacts_patch["safety_contact"] = v or None
+
+        if "billingContact" in data:
+            v = str(data.get("billingContact") or "").strip()
+            contacts_patch["billing_contact"] = v or None
+
+        if banking_patch:
+            company_patch["banking"] = banking_patch
+        if contacts_patch:
+            company_patch["contacts"] = contacts_patch
+        if company_patch:
+            update_data["company_profile"] = company_patch
 
         # Ban enforcement when sensitive identifiers are being set.
         assert_not_banned(
@@ -651,8 +726,8 @@ async def update_profile_with_data(
             if verification.get("mc_number"):
                 update_data.setdefault("mc_number", _normalize_identifier(verification.get("mc_number")))
         
-        # Update user document
-        user_ref.update(update_data)
+        # Update user document (merge so nested company_profile fields don't clobber)
+        user_ref.set(update_data, merge=True)
 
         # Per-user change history
         changed: Dict[str, Any] = {}
@@ -685,6 +760,58 @@ async def update_profile_with_data(
             status_code=500, 
             detail=f"Failed to update profile: {str(e)}"
         )
+
+
+@router.post("/company-logo")
+async def upload_company_logo(
+    file: UploadFile = File(...),
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """Upload a company logo and persist it under company_profile.company_logo_url."""
+    from .database import bucket
+
+    uid = str(user.get("uid") or "")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    file_ext = file.filename.lower().split('.')[-1]
+    allowed_extensions = ['jpg', 'jpeg', 'png', 'gif', 'webp']
+    if file_ext not in allowed_extensions:
+        raise HTTPException(status_code=400, detail=f"Invalid file type. Allowed: {', '.join(allowed_extensions)}")
+
+    file_data = await file.read()
+    if len(file_data) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File size must be less than 5MB")
+
+    try:
+        logo_id = str(uuid.uuid4())
+        storage_path = f"company_logos/{uid}/{logo_id}.{file_ext}"
+        blob = bucket.blob(storage_path)
+        content_type = f"image/{file_ext}" if file_ext != 'jpg' else 'image/jpeg'
+        blob.upload_from_string(file_data, content_type=content_type)
+        blob.make_public()
+        download_url = blob.public_url
+
+        now = time.time()
+        db.collection("users").document(uid).set(
+            {
+                "company_profile": {"company_logo_url": download_url},
+                "updated_at": now,
+            },
+            merge=True,
+        )
+        log_action(uid, "COMPANY_LOGO_UPLOAD", f"Company logo uploaded: {storage_path}")
+
+        return {
+            "success": True,
+            "company_logo_url": download_url,
+        }
+    except Exception as e:
+        print(f"Error uploading company logo: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload company logo: {str(e)}")
 
 
 @router.post("/update")

@@ -10,6 +10,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import secrets
 import time
 
@@ -46,6 +47,55 @@ class CalendarSyncRequest(BaseModel):
 
 class CalendarDisconnectRequest(BaseModel):
     provider: Provider
+
+
+class InternalCalendarEventCreate(BaseModel):
+    title: str
+    all_day: bool = True
+    # YYYY-MM-DD (all-day). Stored as start inclusive, end exclusive.
+    start: str
+    end: str
+    description: Optional[str] = None
+    location: Optional[str] = None
+    reminders: List[int] = Field(default_factory=list)
+
+
+class InternalCalendarEventAssign(BaseModel):
+    carrier_uids: List[str] = Field(default_factory=list)
+    sync_external: bool = True
+
+
+_YMD_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _parse_ymd(value: Optional[str]) -> Optional[datetime]:
+    text = str(value or "").strip()
+    if not text or not _YMD_RE.match(text):
+        return None
+    try:
+        y, m, d = text.split("-")
+        return datetime(int(y), int(m), int(d), tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def _normalize_uid_list(values: Any, *, max_items: int = 100) -> List[str]:
+    raw = values if isinstance(values, list) else []
+    uniq: List[str] = []
+    seen = set()
+    for v in raw:
+        s = str(v or "").strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        uniq.append(s)
+        if len(uniq) >= max_items:
+            break
+    return uniq
+
+
+def _internal_events_col():
+    return db.collection("calendar_internal_events")
 
 
 def _now_ts() -> float:
@@ -635,3 +685,158 @@ async def calendar_sync(payload: CalendarSyncRequest, user: Dict[str, Any] = Dep
     except Exception:
         pass
     return {"ok": True, "synced": int(synced)}
+
+
+@router.get("/internal/events")
+async def list_internal_events(
+    start: Optional[str] = Query(default=None, description="YYYY-MM-DD"),
+    end: Optional[str] = Query(default=None, description="YYYY-MM-DD"),
+    limit: int = Query(default=500, ge=1, le=1000),
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    uid = user.get("uid")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    start_dt = _parse_ymd(start)
+    end_dt = _parse_ymd(end)
+    start_ts = start_dt.timestamp() if start_dt else None
+    end_excl_ts = (end_dt + timedelta(days=1)).timestamp() if end_dt else None
+
+    def _in_range(ev: Dict[str, Any]) -> bool:
+        if start_ts is None and end_excl_ts is None:
+            return True
+        s = ev.get("start_ts")
+        try:
+            s_ts = float(s)
+        except Exception:
+            return False
+        if start_ts is not None and s_ts < start_ts:
+            return False
+        if end_excl_ts is not None and s_ts >= end_excl_ts:
+            return False
+        return True
+
+    # Avoid composite indexes by doing simple equality/array queries and filtering in-app.
+    owner_q = _internal_events_col().where("owner_uid", "==", uid).limit(int(limit))
+    assigned_q = _internal_events_col().where("assigned_carrier_uids", "array_contains", uid).limit(int(limit))
+
+    results: Dict[str, Dict[str, Any]] = {}
+    try:
+        for snap in owner_q.stream():
+            if not snap.exists:
+                continue
+            d = snap.to_dict() or {}
+            d["id"] = snap.id
+            if _in_range(d):
+                results[snap.id] = d
+        for snap in assigned_q.stream():
+            if not snap.exists:
+                continue
+            d = snap.to_dict() or {}
+            d["id"] = snap.id
+            if _in_range(d):
+                results[snap.id] = d
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list internal events: {str(e)}")
+
+    events = list(results.values())
+    events.sort(key=lambda x: float(x.get("start_ts") or 0))
+    return {"events": events}
+
+
+@router.post("/internal/events")
+async def create_internal_event(payload: InternalCalendarEventCreate, user: Dict[str, Any] = Depends(get_current_user)):
+    uid = user.get("uid")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    title = str(payload.title or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Title is required")
+
+    start_dt = _parse_ymd(payload.start)
+    end_dt = _parse_ymd(payload.end)
+    if not start_dt or not end_dt:
+        raise HTTPException(status_code=400, detail="Start and end must be valid dates (YYYY-MM-DD)")
+    if end_dt < start_dt:
+        raise HTTPException(status_code=400, detail="End must be on/after start")
+
+    now = _now_ts()
+    doc_ref = _internal_events_col().document()
+    doc_id = doc_ref.id
+
+    doc = {
+        "owner_uid": uid,
+        "title": title,
+        "all_day": bool(payload.all_day is not False),
+        "start": str(payload.start).strip(),
+        "end": str(payload.end).strip(),
+        "start_ts": float(start_dt.timestamp()),
+        "end_ts": float(end_dt.timestamp()),
+        "description": str(payload.description or "").strip() or None,
+        "location": str(payload.location or "").strip() or None,
+        "reminders": [int(x) for x in (payload.reminders or []) if isinstance(x, (int, float))],
+        "assigned_carrier_uids": [],
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    try:
+        doc_ref.set(doc)
+        try:
+            log_action(uid, "CALENDAR_INTERNAL_EVENT_CREATED", f"Created internal calendar event {doc_id}")
+        except Exception:
+            pass
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create internal event: {str(e)}")
+
+    return {"ok": True, "event": {"id": doc_id, **doc}}
+
+
+@router.post("/internal/events/{event_id}/assign")
+async def assign_internal_event(
+    event_id: str,
+    payload: InternalCalendarEventAssign,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    uid = user.get("uid")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    ev_id = str(event_id or "").strip()
+    if not ev_id:
+        raise HTTPException(status_code=400, detail="Invalid event id")
+
+    carrier_uids = _normalize_uid_list(payload.carrier_uids, max_items=250)
+    if not carrier_uids:
+        return {"ok": True, "assigned": 0}
+
+    ref = _internal_events_col().document(ev_id)
+    snap = ref.get()
+    if not snap.exists:
+        raise HTTPException(status_code=404, detail="Event not found")
+    data = snap.to_dict() or {}
+    if str(data.get("owner_uid") or "").strip() != uid:
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    existing = data.get("assigned_carrier_uids") if isinstance(data.get("assigned_carrier_uids"), list) else []
+    merged = []
+    seen = set()
+    for x in existing + carrier_uids:
+        s = str(x or "").strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        merged.append(s)
+
+    try:
+        ref.set({"assigned_carrier_uids": merged, "updated_at": _now_ts()}, merge=True)
+        try:
+            log_action(uid, "CALENDAR_INTERNAL_EVENT_ASSIGNED", f"Assigned event {ev_id} to {len(carrier_uids)} carriers")
+        except Exception:
+            pass
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to assign event: {str(e)}")
+
+    return {"ok": True, "assigned": len(carrier_uids)}
