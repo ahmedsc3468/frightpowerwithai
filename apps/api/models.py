@@ -386,6 +386,10 @@ class LoadComplete(BaseModel):
     updated_at: float  # Timestamp
     status: LoadStatus = LoadStatus.DRAFT
 
+    # Human/workflow lifecycle stage (distinct from status)
+    workflow_status: Optional[str] = None
+    workflow_status_updated_at: Optional[float] = None
+
     # Normalized ownership fields (backward compatible)
     payer_uid: Optional[str] = None
     payer_role: Optional[str] = None  # broker/shipper
@@ -440,6 +444,10 @@ class LoadComplete(BaseModel):
     
     # Calculated fields
     total_rate: Optional[float] = None
+
+    # Shipper display fields (denormalized; optional for legacy loads)
+    shipper_company_name: Optional[str] = None
+    shipper_name: Optional[str] = None
     
     # Metadata
     metadata: Dict[str, Any] = {}

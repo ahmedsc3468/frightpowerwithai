@@ -1748,6 +1748,48 @@ async def admin_user_search(
     except Exception:
         pass
 
+    # Best-effort: attach shipper display name/company for carrier/driver viewers.
+    # Some legacy loads may not have shipper_company_name populated on the load.
+    try:
+        role_l = str(user_role or "").strip().lower()
+        uid_s = str(uid or "").strip()
+
+        shipper_present = bool(str(sanitized.get("shipper_company_name") or sanitized.get("shipper_name") or "").strip())
+        if not shipper_present and role_l in {"carrier", "driver"}:
+            shipper_uid = str(load.get("created_by") or load.get("payer_uid") or load.get("createdBy") or "").strip()
+
+            # Avoid revealing shipper identity to carriers in marketplace browsing.
+            if role_l == "carrier":
+                assigned_carrier = str(load.get("assigned_carrier") or load.get("assigned_carrier_id") or "").strip()
+                if assigned_carrier and assigned_carrier != uid_s:
+                    shipper_uid = ""
+
+            # Drivers only see shipper info when they are assigned.
+            if role_l == "driver":
+                assigned_driver = str(load.get("assigned_driver") or load.get("assigned_driver_id") or "").strip()
+                if assigned_driver and assigned_driver != uid_s:
+                    shipper_uid = ""
+
+            if shipper_uid:
+                snap = db.collection("users").document(shipper_uid).get()
+                if getattr(snap, "exists", False):
+                    prof = snap.to_dict() or {}
+                    prof_role = str(prof.get("role") or "").strip().lower()
+                    if prof_role in {"shipper", "broker"}:
+                        name = (
+                            prof.get("company_name")
+                            or prof.get("name")
+                            or prof.get("display_name")
+                            or prof.get("full_name")
+                            or (prof.get("email", "").split("@")[0] if prof.get("email") else "")
+                        )
+                        name = str(name or "").strip()
+                        if name:
+                            sanitized.setdefault("shipper_company_name", name)
+                            sanitized.setdefault("shipper_name", name)
+    except Exception:
+        pass
+
     # 1b) Exact match on email (fast path; avoids expensive prefix scans)
     # Firestore string matching is case-sensitive, so try both raw and lower.
     if "@" in query and "." in query:
@@ -6951,27 +6993,28 @@ async def get_load_details(
             )
     elif user_role == "driver":
         # Drivers can ONLY view loads assigned to them
-        if load.get("assigned_driver") != uid:
+        assigned_driver = str(load.get("assigned_driver") or load.get("assigned_driver_id") or "").strip()
+        if assigned_driver != str(uid).strip():
             raise HTTPException(
                 status_code=403,
                 detail="Drivers can only view loads assigned to them"
             )
     else:
         # Carriers can view their own loads OR marketplace loads (POSTED loads they can bid on)
-        if load.get("created_by") != uid:
-            # Allow carriers to view POSTED loads (marketplace loads) for bidding
-            if load.get("status") != LoadStatus.POSTED.value:
+        created_by = str(load.get("created_by") or "").strip()
+        assigned_carrier = str(load.get("assigned_carrier") or load.get("assigned_carrier_id") or "").strip()
+        uid_s = str(uid).strip()
+
+        if created_by != uid_s and assigned_carrier != uid_s:
+            # Allow carriers to view marketplace loads (POSTED) for bidding,
+            # or loads they've already bid on.
+            offers = load.get("offers") or []
+            has_bid = any(str(o.get("carrier_id") or "").strip() == uid_s for o in offers)
+            if load.get("status") != LoadStatus.POSTED.value and not has_bid:
                 raise HTTPException(
                     status_code=403,
                     detail="Not authorized to view this load"
                 )
-            # Also check if carrier has already bid on this load (for viewing their bid)
-            offers = load.get("offers", [])
-            has_bid = any(o.get("carrier_id") == uid for o in offers)
-            # Allow viewing if it's a POSTED load (marketplace) or if they have a bid
-            if not has_bid and load.get("status") == LoadStatus.POSTED.value:
-                # This is a marketplace load, allow viewing for bidding purposes
-                pass
     
     sanitized = sanitize_load_for_viewer(load, viewer_uid=str(uid), viewer_role=str(user_role))
 
@@ -9333,7 +9376,8 @@ async def driver_update_status(
         raise HTTPException(status_code=404, detail="Load not found")
     
     # Assignment check: Driver must be assigned to this load
-    if load.get("assigned_driver") != uid:
+    assigned_driver = str(load.get("assigned_driver") or load.get("assigned_driver_id") or "").strip()
+    if assigned_driver != str(uid).strip():
         raise HTTPException(
             status_code=403,
             detail="You can only update loads assigned to you"
@@ -9371,6 +9415,20 @@ async def driver_update_status(
         "status": new_status.lower(),
         "updated_at": timestamp
     }
+
+    # Keep workflow_status aligned for legacy driver status updates.
+    # (Newer workflow endpoints handle this already.)
+    try:
+        if new_status == LoadStatus.IN_TRANSIT.value.upper():
+            updates["workflow_status"] = "In Transit"
+            updates["workflow_status_updated_at"] = timestamp
+        elif new_status == LoadStatus.DELIVERED.value.upper():
+            # Delivery photo URL is treated as POD evidence in this legacy endpoint.
+            updates["workflow_status"] = "POD Submitted"
+            updates["workflow_status_updated_at"] = timestamp
+            updates.setdefault("pod_submitted_at", timestamp)
+    except Exception:
+        pass
     
     # Add timestamp fields based on status
     if new_status == LoadStatus.IN_TRANSIT.value.upper():
@@ -9899,6 +9957,96 @@ def _generate_mock_services(latitude, longitude, radius, distance_func):
 # SHIPPER-CARRIER RELATIONSHIP ENDPOINTS
 # ============================================================================
 
+
+@app.get("/partners/{partner_uid}/profile")
+async def get_partner_profile(
+    partner_uid: str,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Get a partner (shipper/broker) profile for a carrier.
+
+    Authorization:
+    - Carriers can view a partner profile only if:
+      - they have an active relationship, OR
+      - they have at least one load where assigned_carrier == carrier and created_by == partner
+    - Admins can view any partner profile.
+
+    Returns a safe subset of the partner's user document.
+    """
+    uid = user["uid"]
+    role = user.get("role", "carrier")
+
+    if role not in ["carrier", "admin", "super_admin"]:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    partner_uid_s = str(partner_uid or "").strip()
+    if not partner_uid_s:
+        raise HTTPException(status_code=400, detail="partner_uid required")
+
+    if role not in ["admin", "super_admin"]:
+        # Check active relationship
+        try:
+            rel_q = (
+                db.collection("shipper_carrier_relationships")
+                .where("carrier_id", "==", uid)
+                .where("shipper_id", "==", partner_uid_s)
+                .where("status", "==", "active")
+                .limit(1)
+            )
+            has_rel = any(True for _ in rel_q.stream())
+        except Exception:
+            has_rel = False
+
+        if not has_rel:
+            # Fallback: verify there is at least one load connecting these parties
+            try:
+                loads_ref = db.collection("loads")
+                q = (
+                    loads_ref.where("assigned_carrier", "==", uid)
+                    .where("created_by", "==", partner_uid_s)
+                    .limit(1)
+                )
+                has_load = any(True for _ in q.stream())
+            except Exception:
+                has_load = False
+
+            if not has_load:
+                # Backward-compat: some loads may use assigned_carrier_id
+                try:
+                    loads_ref = db.collection("loads")
+                    q = (
+                        loads_ref.where("assigned_carrier_id", "==", uid)
+                        .where("created_by", "==", partner_uid_s)
+                        .limit(1)
+                    )
+                    has_load = any(True for _ in q.stream())
+                except Exception:
+                    has_load = False
+
+            if not has_load:
+                raise HTTPException(status_code=403, detail="Not authorized to view this profile")
+
+    snap = db.collection("users").document(partner_uid_s).get()
+    if not getattr(snap, "exists", False):
+        raise HTTPException(status_code=404, detail="Partner not found")
+
+    d = snap.to_dict() or {}
+    profile = {
+        "uid": partner_uid_s,
+        "role": d.get("role"),
+        "display_name": d.get("display_name") or d.get("name") or d.get("company_name") or d.get("email"),
+        "company_name": d.get("company_name"),
+        "email": d.get("email"),
+        "phone": d.get("phone"),
+        "address": d.get("address") or d.get("street_address"),
+        "city": d.get("city"),
+        "state": d.get("state"),
+        "zip": d.get("zip") or d.get("postal_code"),
+        "country": d.get("country"),
+    }
+
+    return JSONResponse(content={"profile": profile})
+
 @app.get("/carriers/my-carriers")
 async def get_my_carriers(
     status: Optional[str] = None,
@@ -10036,6 +10184,9 @@ async def get_my_shippers(
                         rel_data["shipper_name"] = shipper_data.get("display_name") or shipper_data.get("name") or rel_data.get("shipper_email")
                         rel_data["shipper_phone"] = shipper_data.get("phone", "N/A")
                         rel_data["shipper_company"] = shipper_data.get("company_name", "N/A")
+                        rel_data["shipper_role"] = shipper_data.get("role")
+                        if not rel_data.get("shipper_email"):
+                            rel_data["shipper_email"] = shipper_data.get("email")
                 except Exception as e:
                     print(f"Error fetching shipper data for {shipper_id}: {e}")
             
@@ -10049,6 +10200,60 @@ async def get_my_shippers(
     except Exception as e:
         print(f"Error fetching shippers: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch shippers")
+
+
+@app.delete("/shipper-carrier-relationships/{relationship_id}")
+async def remove_shipper_carrier_relationship(
+    relationship_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Deactivate a shipper-carrier relationship.
+
+    Authorization:
+    - Carrier can remove relationships where carrier_id == uid
+    - Shipper/Broker can remove relationships where shipper_id == uid
+    - Admins can remove any relationship
+    """
+    uid = user['uid']
+    user_role = user.get("role", "carrier")
+
+    try:
+        ref = db.collection("shipper_carrier_relationships").document(relationship_id)
+        snap = ref.get()
+        if not snap.exists:
+            raise HTTPException(status_code=404, detail="Relationship not found")
+
+        rel = snap.to_dict() or {}
+        shipper_id = str(rel.get("shipper_id") or "").strip()
+        carrier_id = str(rel.get("carrier_id") or "").strip()
+
+        is_admin = user_role in ["admin", "super_admin"]
+        is_carrier_owner = (user_role == "carrier" and carrier_id and carrier_id == uid)
+        is_shipper_owner = (user_role in ["shipper", "broker"] and shipper_id and shipper_id == uid)
+
+        if not (is_admin or is_carrier_owner or is_shipper_owner):
+            raise HTTPException(status_code=403, detail="Not authorized to remove this relationship")
+
+        if str(rel.get("status") or "").lower() == "inactive":
+            return JSONResponse(content={"success": True})
+
+        ref.update({
+            "status": "inactive",
+            "removed_at": int(time.time()),
+            "removed_by": uid,
+        })
+
+        try:
+            log_action(uid, "RELATIONSHIP_REMOVED", f"Removed relationship {relationship_id}")
+        except Exception:
+            pass
+
+        return JSONResponse(content={"success": True})
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error removing relationship {relationship_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to remove relationship")
 
 
 @app.post("/carriers/invite")
@@ -10252,23 +10457,57 @@ async def list_invitations(
                 query2 = query2.where("status", "==", status)
             
             # Get results from both queries and merge (removing duplicates)
-            invites_by_id = {doc.id: doc.to_dict() for doc in query1.stream()}
-            invites_by_email = {doc.id: doc.to_dict() for doc in query2.stream()}
-            invites_by_id.update(invites_by_email)  # Merge dictionaries
+            invites_by_id: Dict[str, Dict[str, Any]] = {}
+
+            for d in list(query1.stream()):
+                dd = d.to_dict() or {}
+                dd.setdefault("id", d.id)
+                invites_by_id[d.id] = dd
+
+            for d in list(query2.stream()):
+                dd = d.to_dict() or {}
+                dd.setdefault("id", d.id)
+                invites_by_id[d.id] = dd
+
             invitations = list(invites_by_id.values())
-            
-            # Convert Firestore timestamps and add document IDs
+
+            # Enrich with shipper profile info (best-effort)
             for inv in invitations:
                 if 'created_at' in inv and hasattr(inv['created_at'], 'timestamp'):
                     inv['created_at'] = int(inv['created_at'].timestamp())
-                if 'id' not in inv:
-                    # Find the doc ID
-                    doc_ref = invitations_ref.where("shipper_id", "==", inv.get("shipper_id"))\
-                                             .where("carrier_email", "==", inv.get("carrier_email"))\
-                                             .limit(1)
-                    docs = list(doc_ref.stream())
-                    if docs:
-                        inv['id'] = docs[0].id
+
+                shipper_id = inv.get("shipper_id")
+                if shipper_id:
+                    try:
+                        shipper_doc = db.collection("users").document(str(shipper_id)).get()
+                        if shipper_doc.exists:
+                            shipper_data = shipper_doc.to_dict() or {}
+                            inv.setdefault("shipper_role", shipper_data.get("role"))
+                            inv.setdefault("shipper_phone", shipper_data.get("phone"))
+                            inv.setdefault("shipper_company", shipper_data.get("company_name"))
+                            inv.setdefault("shipper_name", shipper_data.get("display_name") or shipper_data.get("name") or inv.get("shipper_name"))
+
+                            # Best-effort location enrichment for UI filters.
+                            # These fields are optional and may not exist for all users.
+                            try:
+                                inv.setdefault("shipper_city", shipper_data.get("city") or shipper_data.get("address_city"))
+                            except Exception:
+                                pass
+                            try:
+                                state_guess = shipper_data.get("state") or shipper_data.get("address_state")
+                                if not state_guess:
+                                    state_guess = _extract_state(
+                                        shipper_data.get("address")
+                                        or shipper_data.get("location")
+                                        or shipper_data.get("company_address")
+                                        or shipper_data.get("city_state")
+                                    )
+                                if state_guess and str(state_guess).strip() and str(state_guess).strip() != "Unknown":
+                                    inv.setdefault("shipper_state", str(state_guess).strip().upper())
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
             
             return JSONResponse(content={
                 "invitations": invitations,

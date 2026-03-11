@@ -249,11 +249,32 @@
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  cursor: pointer;
+}
+
+.loads-modal-card:hover {
+  box-shadow: 0 0 0 1px #e5e5e5, 0 8px 14px -10px rgba(0, 0, 0, 0.22);
+}
+
+.loads-modal-card:focus {
+  outline: none;
+}
+
+.loads-modal-card:focus-visible {
+  box-shadow: 0 0 0 2px rgba(59, 87, 167, 0.6), 0 8px 14px -10px rgba(0, 0, 0, 0.22);
 }
 
 .dark-root .loads-modal-card {
   background: #353535;
   box-shadow: 0 0 0 1px #454545, 0 4px 8px -5px rgba(255, 255, 255, 0.12);
+}
+
+.dark-root .loads-modal-card:hover {
+  box-shadow: 0 0 0 1px #454545, 0 10px 16px -12px rgba(255, 255, 255, 0.18);
+}
+
+.dark-root .loads-modal-card:focus-visible {
+  box-shadow: 0 0 0 2px rgba(59, 87, 167, 0.7), 0 10px 16px -12px rgba(255, 255, 255, 0.18);
 }
 
 /* View more indicator */

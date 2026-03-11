@@ -6,7 +6,8 @@ import uuid
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Request
+from fastapi.responses import Response
 
 from .auth import get_current_user
 from .database import bucket, db
@@ -392,7 +393,7 @@ def ensure_rate_confirmation_document(*, load_id: str, shipper: Dict[str, Any]) 
 
 
 @router.get("/loads/{load_id}/documents")
-async def get_load_documents(load_id: str, user: Dict[str, Any] = Depends(get_current_user)):
+async def get_load_documents(load_id: str, request: Request, user: Dict[str, Any] = Depends(get_current_user)):
     load = _get_load(load_id)
     if not load:
         raise HTTPException(status_code=404, detail="Load not found")
@@ -401,7 +402,70 @@ async def get_load_documents(load_id: str, user: Dict[str, Any] = Depends(get_cu
         raise HTTPException(status_code=403, detail="Not authorized to view load documents")
 
     docs = list_load_documents(load_id)
+
+    # Backfill a usable URL for private docs that have a storage_path but no public URL.
+    # This prevents the UI from showing "No URL" even though the object exists.
+    try:
+        base = str(getattr(request, "base_url", "") or "").rstrip("/")
+        if not base:
+            base = str(getattr(settings, "API_BASE_URL", "") or "").rstrip("/")
+        if base:
+            for d in docs:
+                url = str(d.get("url") or "").strip()
+                storage_path = str(d.get("storage_path") or "").strip()
+                doc_id = str(d.get("doc_id") or d.get("id") or "").strip()
+                if not url and storage_path and doc_id:
+                    d["url"] = f"{base}/loads/{load_id}/documents/{doc_id}/download"
+    except Exception:
+        pass
+
     return {"load_id": load_id, "total": len(docs), "documents": docs}
+
+
+@router.get("/loads/{load_id}/documents/{doc_id}/download")
+async def download_load_document(load_id: str, doc_id: str, user: Dict[str, Any] = Depends(get_current_user)):
+    """Download a load document from the bucket via backend authorization.
+
+    This supports cases where objects are not public (or make_public fails), but the
+    document record has a storage_path.
+    """
+
+    load = _get_load(load_id)
+    if not load:
+        raise HTTPException(status_code=404, detail="Load not found")
+
+    if not _can_access_load_documents(load, user.get("uid"), user.get("role")):
+        raise HTTPException(status_code=403, detail="Not authorized to view load documents")
+
+    did = str(doc_id or "").strip()
+    if not did:
+        raise HTTPException(status_code=400, detail="Missing doc id")
+
+    snap = _load_doc_ref(str(load_id), did).get()
+    if not getattr(snap, "exists", False):
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    d = snap.to_dict() or {}
+    storage_path = str(d.get("storage_path") or "").strip()
+    if not storage_path:
+        raise HTTPException(status_code=404, detail="Document has no storage path")
+
+    try:
+        blob = bucket.blob(storage_path)
+        data = blob.download_as_bytes()
+    except Exception:
+        raise HTTPException(status_code=404, detail="Document file not available")
+
+    filename = str(d.get("filename") or "document").strip() or "document"
+    # Minimal header sanitization
+    filename = filename.replace("\n", " ").replace("\r", " ").replace('"', "'")
+    content_type = str(d.get("content_type") or _content_type_for_filename(filename) or "application/octet-stream")
+
+    return Response(
+        content=data,
+        media_type=content_type,
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 @router.post("/loads/{load_id}/documents/upload")

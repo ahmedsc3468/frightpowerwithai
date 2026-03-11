@@ -1,24 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import '../../styles/carrier/MyLoads.css';
 import AddLoads from './AddLoads';
+import LoadDetailsModal from './LoadDetailsModal';
 import { API_URL } from '../../config';
 import { auth } from '../../firebase';
 
-// Map backend statuses to columns
-const statusToColumn = {
-  'draft': 'draft',
-  'posted': 'tendered',
-  'tendered': 'tendered',
-  'covered': 'tendered', // Covered loads are tendered
-  'accepted': 'accepted', // Driver accepted
-  'in_transit': 'inTransit',
-  'delivered': 'delivered',
-  'completed': 'settled',
-  'cancelled': 'cancelled'
-};
-
 // Modal to display all loads in a grid
-function LoadsModal({ title, items, onClose }) {
+function LoadsModal({ title, items, onClose, onLoadClick }) {
   return (
     <div className="loads-modal-overlay" onClick={onClose}>
       <div className="loads-modal-content" onClick={(e) => e.stopPropagation()}>
@@ -35,7 +23,20 @@ function LoadsModal({ title, items, onClose }) {
             </div>
           ) : (
             items.map((it) => (
-              <div className="loads-modal-card" key={it.id}>
+              <div
+                className="loads-modal-card"
+                key={it.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => onLoadClick && onLoadClick(it)}
+                onKeyDown={(e) => {
+                  if (!onLoadClick) return;
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onLoadClick(it);
+                  }
+                }}
+              >
                 <div className="ml-card-top">
                   <div className="ml-id">{it.id}</div>
                   <div className="ml-tag">{it.status}</div>
@@ -73,7 +74,7 @@ function LoadsModal({ title, items, onClose }) {
   );
 }
 
-function Column({ title, items, isLoading, onItemClick, onCardClick }) {
+function Column({ title, items, isLoading, onCardClick }) {
   const key = title ? title.toLowerCase() : '';
   const isTender = key === 'tendered' || key.includes('tender');
   const isAccepted = key === 'accepted' || key.includes('accept');
@@ -155,6 +156,7 @@ function Column({ title, items, isLoading, onItemClick, onCardClick }) {
 export default function MyLoads() {
   const [showAddLoads, setShowAddLoads] = useState(false);
   const [resumeLoad, setResumeLoad] = useState(null); // For resuming draft loads
+  const [detailsLoad, setDetailsLoad] = useState(null); // For viewing load details from modal cards
   const [loads, setLoads] = useState({
     draft: [],
     tendered: [],
@@ -210,29 +212,41 @@ export default function MyLoads() {
       };
 
       data.loads.forEach(load => {
-        // Determine proper status flag based on driver assignment and load status
+        // Prefer workflow_status for lifecycle columns (POD / Invoiced), fallback to status.
         let statusFlag = 'unassigned';
-        let column = 'tendered'; // All loads go to tendered by default
+        let column = 'tendered'; // default
 
-        const status = String(load.status || '').toLowerCase();
+        const status = String(load.status || load.load_status || '').toLowerCase().trim();
+        const workflowRaw = String(load.workflow_status || load.workflowStatus || load.workflow_status_text || '').trim();
+        const workflowNorm = workflowRaw.toLowerCase().replace(/_/g, ' ').trim();
+
         if (status === 'draft') {
           column = 'draft';
           statusFlag = 'draft';
-        } else if (status === 'completed') {
+        } else if (workflowNorm === 'payment settled' || status === 'completed') {
           column = 'settled';
           statusFlag = 'settled';
+        } else if (workflowNorm === 'invoiced') {
+          column = 'invoiced';
+          statusFlag = 'invoiced';
+        } else if (workflowNorm === 'pod submitted') {
+          column = 'pod';
+          statusFlag = 'pod submitted';
+        } else if (workflowNorm === 'in transit' || status === 'in_transit') {
+          column = 'inTransit';
+          statusFlag = 'in transit';
+        } else if (['awarded', 'dispatched'].includes(workflowNorm) || status === 'accepted' || status === 'covered') {
+          column = 'accepted';
+          statusFlag = 'accepted';
+        } else if (workflowNorm === 'tendered' || workflowNorm === 'posted') {
+          column = 'tendered';
+          statusFlag = 'tendered';
         } else if (status === 'delivered') {
           column = 'delivered';
           statusFlag = 'delivered';
-        } else if (status === 'in_transit') {
-          column = 'inTransit';
-          statusFlag = 'in transit';
-        } else if (status === 'accepted') {
-          column = 'accepted';
-          statusFlag = 'accepted';
         } else if (load.assigned_driver || load.assigned_driver_id) {
           const das = String(load.driver_assignment_status || '').toLowerCase();
-          if (das === 'accepted' || status === 'covered') {
+          if (das === 'accepted') {
             statusFlag = 'accepted';
             column = 'accepted';
           } else {
@@ -243,6 +257,8 @@ export default function MyLoads() {
           statusFlag = 'unassigned';
           column = 'tendered';
         }
+
+        const statusLabel = String(workflowRaw || load.workflow_status || load.status || statusFlag || 'N/A');
         
         // Get driver name if assigned
         let driverName = null;
@@ -261,7 +277,7 @@ export default function MyLoads() {
           weight: load.weight,
           price: load.total_rate ? `$${load.total_rate.toLocaleString()}` : 'N/A',
           pickup: load.pickup_date,
-          status: statusFlag,
+          status: statusLabel,
           driver: driverName,
           fullData: load // Store full load data
         });
@@ -274,11 +290,6 @@ export default function MyLoads() {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleDraftClick = (draftCard) => {
-    setResumeLoad(draftCard.fullData);
-    setShowAddLoads(true);
   };
 
   const handleLoadAdded = () => {
@@ -294,6 +305,17 @@ export default function MyLoads() {
 
   const closeModal = () => {
     setModalOpen(null);
+  };
+
+  const openDetailsFromModalCard = (card) => {
+    // card.fullData is the raw backend payload from /loads
+    const payload = card?.fullData || card;
+    if (!payload) return;
+    setDetailsLoad(payload);
+  };
+
+  const closeDetailsModal = () => {
+    setDetailsLoad(null);
   };
 
   return (
@@ -371,29 +393,32 @@ export default function MyLoads() {
 
       {/* Modals for each load type */}
       {modalOpen === 'draft' && (
-        <LoadsModal title="Draft" items={loads.draft} onClose={closeModal} />
+        <LoadsModal title="Draft" items={loads.draft} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
       )}
       {modalOpen === 'tendered' && (
-        <LoadsModal title="Tendered" items={loads.tendered} onClose={closeModal} />
+        <LoadsModal title="Tendered" items={loads.tendered} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
       )}
       {modalOpen === 'accepted' && (
-        <LoadsModal title="Accepted" items={loads.accepted} onClose={closeModal} />
+        <LoadsModal title="Accepted" items={loads.accepted} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
       )}
       {modalOpen === 'inTransit' && (
-        <LoadsModal title="In Transit" items={loads.inTransit} onClose={closeModal} />
+        <LoadsModal title="In Transit" items={loads.inTransit} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
       )}
       {modalOpen === 'delivered' && (
-        <LoadsModal title="Delivered" items={loads.delivered} onClose={closeModal} />
+        <LoadsModal title="Delivered" items={loads.delivered} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
       )}
       {modalOpen === 'pod' && (
-        <LoadsModal title="POD" items={loads.pod} onClose={closeModal} />
+        <LoadsModal title="POD" items={loads.pod} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
       )}
       {modalOpen === 'invoiced' && (
-        <LoadsModal title="Invoiced" items={loads.invoiced} onClose={closeModal} />
+        <LoadsModal title="Invoiced" items={loads.invoiced} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
       )}
       {modalOpen === 'settled' && (
-        <LoadsModal title="Settled" items={loads.settled} onClose={closeModal} />
+        <LoadsModal title="Settled" items={loads.settled} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
       )}
+
+      {/* Nested modal: open when user clicks a specific load card inside the grid modal */}
+      {detailsLoad && <LoadDetailsModal load={detailsLoad} onClose={closeDetailsModal} />}
 
       {showAddLoads && <AddLoads onClose={handleLoadAdded} draftLoad={resumeLoad} />}
     </div>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { API_URL } from '../../config'
+import LoadDetailsModal from './LoadDetailsModal'
 import '../../styles/carrier/ShipperPartners.css'
 // Use public placeholder user avatars instead of onboarding images
 const avatarUrls = [
@@ -14,29 +15,68 @@ const avatarUrls = [
   'https://i.pravatar.cc/80?img=8'
 ]
 
-// Mock partners data (fallback)
-const mockPartners = [
-  { id:1, name:'Swift Logistics', mc:'Broker', contactName:'Sarah Johnson', contactEmail:'sarah@swift.com', phone:'(555) 123-4567', loads:47, avgPay:'2 Days', dispute:'2.1%', status:'Partnered', favorite:true, rating:4.8, onTime:'97%', lastLoad:'3 days ago', location:'Dallas, TX' },
-  { id:2, name:'Global Freight Co.', mc:'Shipper', contactName:'Mike Rodriguez', contactEmail:'mike@global.com', phone:'(555) 987-6543', loads:23, avgPay:'1 Day', dispute:'0.8%', status:'Partnered', favorite:true, rating:5.0, onTime:'99%', lastLoad:'1 day ago', location:'Los Angeles, CA' },
-  { id:3, name:'Prime Transport', mc:'Broker', contactName:'Lisa Chen', contactEmail:'lisa@prime.com', phone:'(555) 456-7890', loads:8, avgPay:'5 Days', dispute:'5.2%', status:'Pending', favorite:true, rating:4.2, onTime:'94%', lastLoad:'1 week ago', location:'Atlanta, GA' }
-]
+const FAVORITES_STORAGE_KEY = 'fp_carrier_partner_favorites_v1'
+
+const stableHash = (value) => {
+  const str = String(value ?? '')
+  let hash = 0
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 31 + str.charCodeAt(i)) >>> 0
+  }
+  return hash
+}
+
+const avatarForKey = (key) => {
+  const idx = stableHash(key) % avatarUrls.length
+  return avatarUrls[idx]
+}
+
+const normalizePartnerStatus = (rawStatus) => {
+  const s = String(rawStatus ?? '').trim().toLowerCase()
+  if (s === 'active' || s === 'partnered' || s === 'accepted') return 'Partnered'
+  if (s === 'pending') return 'Pending'
+  if (!s) return 'Partnered'
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+const partnerTypeLabel = (roleOrType) => {
+  const v = String(roleOrType ?? '').trim().toLowerCase()
+  if (!v) return ''
+  if (v === 'broker') return 'Broker'
+  if (v === 'shipper') return 'Shipper'
+  if (v === 'shipper_broker' || v === 'shipper-broker' || v === 'shippers/brokers') return 'Shipper/Broker'
+  return v.charAt(0).toUpperCase() + v.slice(1)
+}
 
 export default function ShipperPartners(){
   const { currentUser } = useAuth();
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [activeTab, setActiveTab] = useState('all') // all | favorites | invites | history
+  const [partnersPage, setPartnersPage] = useState(1)
+  const partnersPageSize = 10
   const [partners, setPartners] = useState([])
   const [invites, setInvites] = useState([])
+  const [outgoingRequests, setOutgoingRequests] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadingInvites, setLoadingInvites] = useState(true)
+  const [errorPartners, setErrorPartners] = useState('')
+  const [errorInvites, setErrorInvites] = useState('')
+  const [favoriteIds, setFavoriteIds] = useState(() => {
+    try {
+      const raw = localStorage.getItem(FAVORITES_STORAGE_KEY)
+      const arr = JSON.parse(raw || '[]')
+      if (Array.isArray(arr)) return new Set(arr.map(String))
+    } catch (e) {
+      // ignore
+    }
+    return new Set()
+  })
 
   // Fetch partners (accepted relationships)
   useEffect(() => {
-    if (currentUser && activeTab === 'all') {
-      fetchPartners();
-    }
-  }, [currentUser, activeTab]);
+    if (currentUser) fetchPartners()
+  }, [currentUser]);
 
   // Fetch invitations
   useEffect(() => {
@@ -45,9 +85,15 @@ export default function ShipperPartners(){
     }
   }, [currentUser, activeTab]);
 
+  // Reset paging when filters/search change
+  useEffect(() => {
+    setPartnersPage(1)
+  }, [query, statusFilter])
+
   const fetchPartners = async () => {
     if (!currentUser) return;
     setLoading(true);
+    setErrorPartners('');
     try {
       const token = await currentUser.getIdToken();
       const response = await fetch(`${API_URL}/shippers/my-shippers`, {
@@ -59,29 +105,42 @@ export default function ShipperPartners(){
 
       if (response.ok) {
         const data = await response.json();
-        const formattedPartners = (data.shippers || []).map(rel => ({
-          id: rel.shipper_id,
-          name: rel.shipper_name || rel.shipper_company || 'Unknown Shipper',
-          mc: 'Shipper',
-          contactName: rel.shipper_name || 'N/A',
-          contactEmail: rel.shipper_email,
-          phone: rel.shipper_phone || '(555) 000-0000',
-          loads: 0,
-          avgPay: 'N/A',
-          dispute: '0%',
-          status: rel.status || 'Partnered',
-          favorite: false,
-          rating: 4.5,
-          onTime: '95%',
-          lastLoad: 'N/A',
-          location: 'N/A'
-        }));
+        const formattedPartners = (data.shippers || []).map(rel => {
+          const shipperId = String(rel.shipper_id || rel.shipper_uid || rel.shipperId || '')
+          const relationshipId = String(rel.id || rel.relationship_id || '')
+          const favorite = favoriteIds.has(shipperId)
+          const type = partnerTypeLabel(rel.shipper_role || rel.partner_type || rel.type)
+
+          return {
+            id: shipperId,
+            relationshipId,
+            name: rel.shipper_company || rel.shipper_name || rel.shipper_email || 'Unknown Partner',
+            mc: type,
+            contactName: rel.shipper_name || 'N/A',
+            contactEmail: rel.shipper_email || '',
+            phone: rel.shipper_phone || 'N/A',
+            loads: rel.loads_completed || rel.loads || 0,
+            avgPay: rel.avg_pay_speed || rel.avgPay || 'N/A',
+            dispute: rel.dispute_rate || rel.dispute || 'N/A',
+            status: normalizePartnerStatus(rel.status),
+            favorite,
+            rating: rel.rating || 0,
+            onTime: rel.on_time_rate || rel.onTime || 'N/A',
+            lastLoad: rel.last_load || rel.lastLoad || 'N/A',
+            location: rel.location || 'N/A',
+            acceptedAt: rel.accepted_at || rel.created_at || null
+          }
+        });
         setPartners(formattedPartners);
+      } else {
+        const msg = await response.text();
+        setErrorPartners(msg || 'Failed to load partners');
+        setPartners([]);
       }
     } catch (error) {
       console.error('Error fetching partners:', error);
-      // Keep mock data as fallback
-      setPartners(mockPartners);
+      setErrorPartners('Failed to load partners');
+      setPartners([]);
     } finally {
       setLoading(false);
     }
@@ -90,9 +149,10 @@ export default function ShipperPartners(){
   const fetchInvitations = async () => {
     if (!currentUser) return;
     setLoadingInvites(true);
+    setErrorInvites('');
     try {
       const token = await currentUser.getIdToken();
-      const response = await fetch(`${API_URL}/carriers/invitations?status=pending`, {
+      const response = await fetch(`${API_URL}/carriers/invitations`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -101,25 +161,44 @@ export default function ShipperPartners(){
 
       if (response.ok) {
         const data = await response.json();
-        const formattedInvites = (data.invitations || []).map(inv => ({
-          id: inv.id,
-          name: inv.shipper_name || 'Unknown Shipper',
-          dot: 'N/A',
-          mc: 'Shipper',
-          email: inv.shipper_email,
-          phone: '(555) 000-0000',
-          rating: 4.5,
-          badge: 'Pending',
-          message: inv.message || `${inv.shipper_name || 'A shipper'} has invited you to join their carrier network.`,
-          received: inv.created_at ? formatRelativeTime(inv.created_at) : 'Recently',
-          expires: '7 days',
-          invitationId: inv.id,
-          shipperId: inv.shipper_id
-        }));
+        const formattedInvites = (data.invitations || []).map(inv => {
+          const company = inv.shipper_company || ''
+          const displayName = inv.shipper_name || ''
+          const email = inv.shipper_email || ''
+          const primaryName = String(company || displayName || email || 'Unknown Partner')
+
+          return {
+            id: String(inv.id || ''),
+            invitationId: String(inv.id || ''),
+            shipperId: String(inv.shipper_id || ''),
+            name: primaryName,
+            company: String(company || ''),
+            contactName: String(displayName || ''),
+            type: partnerTypeLabel(inv.shipper_role || inv.partner_type || inv.type),
+            role: String(inv.shipper_role || ''),
+            email: String(email || ''),
+            phone: String(inv.shipper_phone || ''),
+            state: String(inv.shipper_state || ''),
+            city: String(inv.shipper_city || ''),
+            rating: typeof inv.rating === 'number' ? inv.rating : null,
+            status: String(inv.status || ''),
+            badge: normalizePartnerStatus(inv.status),
+            message: typeof inv.message === 'string' ? inv.message.trim() : '',
+            createdAt: inv.created_at || null,
+            acceptedAt: inv.accepted_at || null,
+            received: inv.created_at ? formatRelativeTime(inv.created_at) : 'Recently'
+          }
+        });
         setInvites(formattedInvites);
+      } else {
+        const msg = await response.text();
+        setErrorInvites(msg || 'Failed to load invitations');
+        setInvites([]);
       }
     } catch (error) {
       console.error('Error fetching invitations:', error);
+      setErrorInvites('Failed to load invitations');
+      setInvites([]);
     } finally {
       setLoadingInvites(false);
     }
@@ -147,10 +226,9 @@ export default function ShipperPartners(){
       });
 
       if (response.ok) {
-        alert('Invitation accepted! The shipper has been added to your partners list.');
-        // Refresh invitations and partners
-        fetchInvitations();
-        fetchPartners();
+        alert('Invitation accepted! The partner has been added to your list.');
+        // Refresh invitations and partners (real data only)
+        await Promise.all([fetchInvitations(), fetchPartners()])
       } else {
         const error = await response.json();
         alert(error.detail || 'Failed to accept invitation');
@@ -188,79 +266,309 @@ export default function ShipperPartners(){
     }
   };
 
-  // Mock invites dataset for fallback (demo-only)
-  const mockInvites = [
-    { id: 201, name: 'Swift Logistics Corp', dot: '2847291', mc: '928374', email: 'contact@swiftlogistics.com', phone: '(555) 123-4567', rating: 4.2, badge: 'Compliant', message: "We're looking for reliable carriers for our Northeast routes. Your safety record and on-time performance make you an ideal partner for our operations.", received: '2 hours ago', expires: '5 days' },
-    { id: 202, name: 'Global Freight Solutions', dot: '1847392', mc: '728364', email: 'partnerships@globalfreight.com', phone: '(555) 987-6543', rating: 4.8, badge: 'Under Review', message: 'Expanding our carrier network for cross-country shipments. Your fleet capacity and excellent track record align perfectly with our requirements.', received: '1 day ago', expires: '4 days' },
-    { id: 203, name: 'Express Cargo Network', dot: '3847201', mc: '628374', email: 'carriers@expresscargo.net', phone: '(555) 456-7890', rating: 4.5, badge: 'Compliant', message: 'Time-sensitive shipments require dependable partners. Your punctuality and service quality make you a perfect fit for our express delivery network.', received: '3 days ago', expires: '2 days' }
-  ]
-
-  // Mock requests (things the user sent) for the 'My Requests' tab
-  const requests = [
-    { id: 301, name: 'Northstar Logistics', dot: '9847210', mc: '112233', email: 'ops@northstar.com', phone: '(555) 222-3344', rating: 4.1, badge: 'Pending', message: 'Requesting partnership for Midwest lane coverage.', requested: '3 days ago', status: 'Pending' },
-    { id: 302, name: 'Coastal Carriers', dot: '7845123', mc: '778899', email: 'partners@coastalcarriers.com', phone: '(555) 444-5566', rating: 4.6, badge: 'Compliant', message: 'Seeking long-term regional partnership.', requested: '1 week ago', status: 'Sent' }
-  ]
-
-  // Mock documents for Document History tab
-  const documents = [
-    { id: 401, title: 'Proof of Delivery - Load #FP2024-0892', type: 'pod', status: 'Signed', uploaded: 'Today, 2:34 PM', by: 'Sarah Johnson (Swift Logistics)', size: '2.4 MB', icon: 'fa-file' },
-    { id: 402, title: 'Rate Confirmation - Load #FP2024-0892', type: 'rate', status: 'Pending Signature', uploaded: 'Yesterday, 4:12 PM', by: 'Mike Chan (FreightPower AI)', size: '1.8 MB', icon: 'fa-file-invoice-dollar' },
-    { id: 403, title: 'Bill of Lading - Load #FP2024-0892', type: 'bol', status: 'Signed', uploaded: '2 days ago, 10:45 AM', by: 'David Wilson (Swift Logistics)', size: '3.1 MB', icon: 'fa-file-text' },
-    { id: 404, title: 'Insurance Certificate', type: 'insurance', status: 'Expires in 15 days', uploaded: '1 week ago', by: 'John Wilson (FreightPower AI)', size: '1.2 MB', icon: 'fa-shield-alt' },
-    { id: 405, title: 'Master Service Agreement', type: 'contract', status: 'Executed', uploaded: '2 weeks ago', by: 'Legal Team (Swift Logistics)', size: '4.7 MB', icon: 'fa-file-contract' },
-    { id: 406, title: 'W-9 Tax Form', type: 'tax', status: 'Valid', uploaded: '3 weeks ago', by: 'John Wilson (FreightPower AI)', size: '890 KB', icon: 'fa-file-alt' }
-  ]
-
   const [localPartners, setLocalPartners] = useState([])
   const [openMenuId, setOpenMenuId] = useState(null)
   const [inviteTab, setInviteTab] = useState('incoming') // incoming | requests
 
+  const [inviteQuery, setInviteQuery] = useState('')
+  const [inviteStatusFilter, setInviteStatusFilter] = useState('pending') // all | pending | accepted | declined
+  const [inviteRegionFilter, setInviteRegionFilter] = useState('all')
+
+  const [favTypeFilter, setFavTypeFilter] = useState('all')
+  const [favStatusFilter, setFavStatusFilter] = useState('all')
+  const [favSort, setFavSort] = useState('name_asc')
+  const [favRatingFilter, setFavRatingFilter] = useState('all')
+  const [favLocationFilter, setFavLocationFilter] = useState('all')
+
+  const [profileModalOpen, setProfileModalOpen] = useState(false)
+  const [profileLoading, setProfileLoading] = useState(false)
+  const [profileError, setProfileError] = useState('')
+  const [profileData, setProfileData] = useState(null)
+
+  const [docsModalOpen, setDocsModalOpen] = useState(false)
+  const [docsPartner, setDocsPartner] = useState(null)
+  const [docsLoadsLoading, setDocsLoadsLoading] = useState(false)
+  const [docsLoadsError, setDocsLoadsError] = useState('')
+  const [docsLoads, setDocsLoads] = useState([])
+
+  const [detailsLoad, setDetailsLoad] = useState(null)
+
   // Update localPartners when partners change
   useEffect(() => {
-    if (partners.length > 0) {
-      setLocalPartners(partners);
-    } else if (!loading) {
-      // Only use mock data if we're not loading and have no real data
-      setLocalPartners(mockPartners);
-    }
+    setLocalPartners(partners);
   }, [partners, loading]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(Array.from(favoriteIds)))
+    } catch (e) {
+      // ignore
+    }
+  }, [favoriteIds])
+
+  const toggleFavorite = (partnerId) => {
+    const id = String(partnerId || '')
+    if (!id) return
+    setFavoriteIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+    setLocalPartners(prev => prev.map(x => x.id === id ? { ...x, favorite: !x.favorite } : x))
+  }
+
+  const handleRemovePartner = async (relationshipId, partnerId) => {
+    if (!currentUser) return
+    if (!relationshipId) {
+      alert('Unable to remove: missing relationship id')
+      return
+    }
+    if (!confirm('Remove this partner?')) return
+
+    try {
+      const token = await currentUser.getIdToken()
+      const response = await fetch(`${API_URL}/shipper-carrier-relationships/${relationshipId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+      if (response.ok) {
+        setLocalPartners(prev => prev.filter(p => p.relationshipId !== relationshipId))
+        setPartners(prev => prev.filter(p => p.relationshipId !== relationshipId))
+        setFavoriteIds(prev => {
+          const next = new Set(prev)
+          const id = String(partnerId || '')
+          if (id) next.delete(id)
+          return next
+        })
+      } else {
+        const err = await response.json().catch(() => null)
+        alert(err?.detail || 'Failed to remove partner')
+      }
+    } catch (e) {
+      console.error('Error removing partner:', e)
+      alert('Failed to remove partner')
+    }
+  }
+
+  const openPartnerProfile = async (partnerId) => {
+    const pid = String(partnerId || '').trim()
+    if (!currentUser || !pid) return
+
+    setProfileModalOpen(true)
+    setProfileLoading(true)
+    setProfileError('')
+    setProfileData(null)
+    try {
+      const token = await currentUser.getIdToken()
+      const res = await fetch(`${API_URL}/partners/${encodeURIComponent(pid)}/profile`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => null)
+        setProfileError(err?.detail || 'Failed to load profile')
+        return
+      }
+      const data = await res.json()
+      setProfileData(data?.profile || null)
+    } catch (e) {
+      setProfileError(e?.message || 'Failed to load profile')
+    } finally {
+      setProfileLoading(false)
+    }
+  }
+
+  const openPartnerDocs = async (partner) => {
+    const pid = String(partner?.id || '').trim()
+    if (!currentUser || !pid) return
+
+    setDocsPartner(partner)
+    setDocsModalOpen(true)
+    setDocsLoadsLoading(true)
+    setDocsLoadsError('')
+    setDocsLoads([])
+    try {
+      const token = await currentUser.getIdToken()
+      const res = await fetch(`${API_URL}/loads?page=1&page_size=250&exclude_drafts=true`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => null)
+        setDocsLoadsError(err?.detail || 'Failed to load loads')
+        return
+      }
+      const data = await res.json()
+      const allLoads = Array.isArray(data?.loads) ? data.loads : (Array.isArray(data) ? data : [])
+      const filteredLoads = allLoads.filter(l => {
+        const createdBy = String(l?.created_by || l?.createdBy || l?.shipper_id || '').trim()
+        return createdBy && createdBy === pid
+      })
+      // Sort newest first
+      filteredLoads.sort((a, b) => {
+        const at = Number(a?.updated_at || a?.created_at || 0)
+        const bt = Number(b?.updated_at || b?.created_at || 0)
+        return bt - at
+      })
+      setDocsLoads(filteredLoads)
+    } catch (e) {
+      setDocsLoadsError(e?.message || 'Failed to load loads')
+    } finally {
+      setDocsLoadsLoading(false)
+    }
+  }
+
+  const closeProfileModal = () => {
+    setProfileModalOpen(false)
+    setProfileLoading(false)
+    setProfileError('')
+    setProfileData(null)
+  }
+
+  const closeDocsModal = () => {
+    setDocsModalOpen(false)
+    setDocsPartner(null)
+    setDocsLoads([])
+    setDocsLoadsError('')
+    setDocsLoadsLoading(false)
+  }
+
   const filtered = localPartners.filter(p => {
-    // tab-level filtering
-    if(activeTab === 'favorites' && p.id !== 1) return false // sample: only id 1 is favorite
-    if(activeTab === 'invites' && p.status.toLowerCase() !== 'pending') return false
-    // history just shows all (could be a different dataset)
+    if (!p) return false
 
-    // status filter dropdown
-    if(statusFilter !== 'all' && p.status.toLowerCase() !== statusFilter) return false
+    const status = String(p.status || '').toLowerCase()
+    if (statusFilter !== 'all' && status !== statusFilter) return false
 
-    // search query
-    if(!query) return true
-    return p.name.toLowerCase().includes(query.toLowerCase()) || p.contactEmail.toLowerCase().includes(query.toLowerCase())
+    if (!query) return true
+    const q = query.toLowerCase()
+    const name = String(p.name || '').toLowerCase()
+    const email = String(p.contactEmail || '').toLowerCase()
+    return name.includes(q) || email.includes(q)
   })
 
-  // prepare rows to avoid nested JSX/ternary complexity in render
-  const favorites = localPartners.filter(p => p.favorite)
-  // Ensure we display six cards in the favorites view for the demo/mock
-  const displayFavorites = (favorites.length >= 6)
-    ? favorites.slice(0,6)
-    : Array.from({length:6}, (_,i) => {
-        // prefer existing favorites, then fall back to partners data repeated
-        if(favorites[i]) return favorites[i]
-        const src = localPartners[i % localPartners.length]
-        return { ...src, id: 1000 + i }
-      })
+  const totalPartnerPages = Math.max(1, Math.ceil(filtered.length / partnersPageSize))
+  const safePartnersPage = Math.min(Math.max(1, partnersPage), totalPartnerPages)
+  const startIdx = (safePartnersPage - 1) * partnersPageSize
+  const endIdxExclusive = startIdx + partnersPageSize
+  const pagedPartners = filtered.slice(startIdx, endIdxExclusive)
 
-  const rows = filtered.length === 0 ? (
+  useEffect(() => {
+    if (partnersPage !== safePartnersPage) setPartnersPage(safePartnersPage)
+  }, [partnersPage, safePartnersPage])
+
+  const listForInviteTab = inviteTab === 'incoming' ? invites : outgoingRequests
+
+  const filteredInviteList = listForInviteTab
+    .filter(inv => {
+      if (!inv) return false
+      const status = String(inv.status || '').toLowerCase()
+      if (inviteStatusFilter !== 'all' && status !== inviteStatusFilter) return false
+      const region = String(inv.state || '').trim().toUpperCase()
+      if (inviteRegionFilter !== 'all' && region !== inviteRegionFilter) return false
+
+      const q = String(inviteQuery || '').trim().toLowerCase()
+      if (!q) return true
+      const hay = [inv.name, inv.company, inv.contactName, inv.email, inv.phone, inv.state, inv.city]
+        .map(x => String(x || '').toLowerCase())
+        .join(' | ')
+      return hay.includes(q)
+    })
+    .sort((a, b) => {
+      const at = Number(a?.createdAt || 0)
+      const bt = Number(b?.createdAt || 0)
+      return bt - at
+    })
+
+  const inviteStates = Array.from(
+    new Set(
+      listForInviteTab
+        .map(i => String(i?.state || '').trim().toUpperCase())
+        .filter(Boolean)
+    )
+  ).sort()
+
+  const pendingInvitesCount = invites.filter(i => String(i?.status || '').toLowerCase() === 'pending').length
+  const activePartnersCount = partners.length
+
+  const startOfMonthEpoch = (() => {
+    const now = new Date()
+    const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0)
+    return Math.floor(start.getTime() / 1000)
+  })()
+  const acceptedThisMonthCount = partners.filter(p => {
+    const ts = Number(p?.acceptedAt || 0)
+    return ts && ts >= startOfMonthEpoch
+  }).length
+  const requestsSentCount = outgoingRequests.length
+
+  const favorites = localPartners.filter(p => p.favorite)
+
+  const favoriteLocations = Array.from(
+    new Set(
+      favorites
+        .map(f => String(f?.location || '').trim())
+        .filter(v => v && v.toLowerCase() !== 'n/a')
+    )
+  ).sort((a, b) => a.localeCompare(b))
+
+  const filteredFavorites = favorites
+    .filter(p => {
+      if (!p) return false
+      if (favTypeFilter !== 'all') {
+        const t = String(p?.mc || '').trim().toLowerCase()
+        if (favTypeFilter === 'shipper' && t !== 'shipper') return false
+        if (favTypeFilter === 'broker' && t !== 'broker') return false
+      }
+      if (favStatusFilter !== 'all') {
+        const s = String(p?.status || '').trim().toLowerCase()
+        if (s !== favStatusFilter) return false
+      }
+      if (favRatingFilter !== 'all') {
+        const r = Number(p?.rating || 0)
+        if (favRatingFilter === '4' && r < 4) return false
+        if (favRatingFilter === '3' && r < 3) return false
+      }
+      if (favLocationFilter !== 'all') {
+        const loc = String(p?.location || '').trim()
+        if (loc !== favLocationFilter) return false
+      }
+      return true
+    })
+    .sort((a, b) => {
+      const an = String(a?.name || '')
+      const bn = String(b?.name || '')
+      if (favSort === 'name_desc') return bn.localeCompare(an)
+      return an.localeCompare(bn)
+    })
+
+  const clearFavFilters = () => {
+    setFavTypeFilter('all')
+    setFavStatusFilter('all')
+    setFavSort('name_asc')
+    setFavRatingFilter('all')
+    setFavLocationFilter('all')
+  }
+
+  const rows = loading ? (
+    <div className="list-row no-results">
+      <div className="col" style={{flex:1,textAlign:'center',padding:'32px 0',color:'#6b7280'}}>Loading partners...</div>
+    </div>
+  ) : errorPartners ? (
+    <div className="list-row no-results">
+      <div className="col" style={{flex:1,textAlign:'center',padding:'32px 0',color:'#6b7280'}}>{errorPartners}</div>
+    </div>
+  ) : filtered.length === 0 ? (
     <div className="list-row no-results">
       <div className="col" style={{flex:1,textAlign:'center',padding:'32px 0',color:'#6b7280'}}>No partners found</div>
     </div>
   ) : (
-    filtered.map(p => (
+    pagedPartners.map(p => (
       <div className="list-row" key={p.id}>
         <div className="col partner">
           <div className="avatar">
-            <img src={avatarUrls[p.id % avatarUrls.length]} alt={`${p.name} avatar`} />
+            <img src={avatarForKey(p.id)} alt={`${p.name} avatar`} />
           </div>
           <div>
             <div className="name">{p.name} <span className="mc">{p.mc}</span></div>
@@ -268,9 +576,7 @@ export default function ShipperPartners(){
           <button
             aria-label={p.favorite ? 'Unfavorite' : 'Mark as favorite'}
             className={`fav ${p.favorite ? 'on' : ''}`}
-            onClick={() => {
-              setLocalPartners(prev => prev.map(x => x.id === p.id ? { ...x, favorite: !x.favorite } : x))
-            }}
+            onClick={() => toggleFavorite(p.id)}
           >
             <i className={`fa-star ${p.favorite ? 'fa-solid' : 'fa-regular'}`} />
           </button>
@@ -284,9 +590,9 @@ export default function ShipperPartners(){
         <div className="col small center">{p.dispute}</div>
         <div className="col small center"><span className={`status ${p.status.toLowerCase()}`}>{p.status}</span></div>
         <div className="col actions">
-          <a className="link desktop-only" onClick={() => console.log('view', p.id)}>View</a>
-          <a className="link desktop-only" onClick={() => console.log('docs', p.id)}>Docs</a>
-          <a className="link remove desktop-only" onClick={() => console.log('remove', p.id)}>Remove</a>
+          <a className="link desktop-only" onClick={() => openPartnerProfile(p.id)}>View</a>
+          <a className="link desktop-only" onClick={() => openPartnerDocs(p)}>Docs</a>
+          <a className="link remove desktop-only" onClick={() => handleRemovePartner(p.relationshipId, p.id)}>Remove</a>
 
           {/* Ellipsis menu for small screens */}
           <div className="actions-ellipsis">
@@ -301,9 +607,9 @@ export default function ShipperPartners(){
 
             {openMenuId === p.id && (
               <div className="ellipsis-menu" role="menu">
-                <button role="menuitem" onClick={() => { console.log('view', p.id); setOpenMenuId(null) }}>View</button>
-                <button role="menuitem" onClick={() => { console.log('docs', p.id); setOpenMenuId(null) }}>Docs</button>
-                <button role="menuitem" onClick={() => { console.log('remove', p.id); setOpenMenuId(null) }} className="danger">Remove</button>
+                <button role="menuitem" onClick={() => { openPartnerProfile(p.id); setOpenMenuId(null) }}>View</button>
+                <button role="menuitem" onClick={() => { openPartnerDocs(p); setOpenMenuId(null) }}>Docs</button>
+                <button role="menuitem" onClick={() => { handleRemovePartner(p.relationshipId, p.id); setOpenMenuId(null) }} className="danger">Remove</button>
               </div>
             )}
           </div>
@@ -320,7 +626,7 @@ export default function ShipperPartners(){
           <p className="fp-subtitle">Manage partnerships, scorecards, and document exchanges</p>
         </div>
         <div>
-          <button className="btn small-cd">+ Add Partner</button>
+          <button className="btn small-cd" onClick={() => setActiveTab('invites')}>+ Add Partner</button>
         </div>
       </header>
 
@@ -374,6 +680,17 @@ export default function ShipperPartners(){
         </div>
       )}
 
+      {activeTab === 'all' && (
+        loading ? (
+          <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
+            <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: '24px', marginBottom: '8px' }}></i>
+            <p>Loading partners...</p>
+          </div>
+        ) : errorPartners ? (
+          <div style={{ padding: '24px', color: '#6b7280' }}>{errorPartners}</div>
+        ) : null
+      )}
+
       {activeTab === 'favorites' ? (
         <div className="favorites-grid">
           {/* Filter & Sort bar above favorites grid (matches attachment) */}
@@ -383,57 +700,60 @@ export default function ShipperPartners(){
             </div>
             <div className="fs-controls">
               <div className="fs-control">
-                <select>
-                  <option>All Partners</option>
-                  <option>Shipper</option>
-                  <option>Broker</option>
+                <select value={favTypeFilter} onChange={(e) => setFavTypeFilter(e.target.value)}>
+                  <option value="all">All Partners</option>
+                  <option value="shipper">Shipper</option>
+                  <option value="broker">Broker</option>
                 </select>
               </div>
               <div className="fs-control">
-                <select>
-                  <option>All Status</option>
-                  <option>Partnered</option>
-                  <option>Pending</option>
+                <select value={favStatusFilter} onChange={(e) => setFavStatusFilter(e.target.value)}>
+                  <option value="all">All Status</option>
+                  <option value="partnered">Partnered</option>
+                  <option value="pending">Pending</option>
                 </select>
               </div>
               <div className="fs-control">
-                <select>
-                  <option>Name A-Z</option>
-                  <option>Name Z-A</option>
+                <select value={favSort} onChange={(e) => setFavSort(e.target.value)}>
+                  <option value="name_asc">Name A-Z</option>
+                  <option value="name_desc">Name Z-A</option>
                 </select>
               </div>
 
               <div className="fs-control">
-                <select>
-                  <option>All Ratings</option>
-                  <option>4+</option>
-                  <option>3+</option>
-                  </select>
+                <select value={favRatingFilter} onChange={(e) => setFavRatingFilter(e.target.value)}>
+                  <option value="all">All Ratings</option>
+                  <option value="4">4+</option>
+                  <option value="3">3+</option>
+                </select>
               </div>
 
               <div className="fs-control">
-                <select>
-                  <option>All Locations</option>
-                  <option>Dallas, TX</option>
-                  <option>Los Angeles, CA</option>
+                <select value={favLocationFilter} onChange={(e) => setFavLocationFilter(e.target.value)} disabled={favoriteLocations.length === 0}>
+                  <option value="all">All Locations</option>
+                  {favoriteLocations.map(loc => (
+                    <option key={loc} value={loc}>{loc}</option>
+                  ))}
                 </select>
               </div>
 
             </div>
             <div className="fs-right">
-              <a className="clear-all">Clear All</a>
+              <a className="clear-all" onClick={clearFavFilters}>Clear All</a>
             </div>
           </div>
           {favorites.length === 0 ? (
             <div className="no-results" style={{padding:24,color:'#6b7280'}}>No favorites yet</div>
+          ) : filteredFavorites.length === 0 ? (
+            <div className="no-results" style={{padding:24,color:'#6b7280'}}>No favorites match your filters</div>
           ) : (
             <div className="grid">
-                {displayFavorites.map(p => (
+                {filteredFavorites.map(p => (
                 <div className="fav-card card" key={p.id}>
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
                     <div className="fav-card-left">
                       <div className="avatar square">
-                        <img src={avatarUrls[p.id % avatarUrls.length]} alt={`${p.name} avatar`} />
+                        <img src={avatarForKey(p.id)} alt={`${p.name} avatar`} />
                       </div>
                       <div>
                         <div className="fav-title">{p.name}</div>
@@ -446,13 +766,11 @@ export default function ShipperPartners(){
                       <i className="fa-heart fa-regular fav-heart" aria-hidden="true" />
                     </div>
                   </div>
-
                   <div className="fav-stats">
                     <div className="stat-row"><div className="label">Pay Speed</div><div className="value">{p.avgPay}</div></div>
                     <div className="stat-row"><div className="label">On-time Rate</div><div className="value green">{p.onTime}</div></div>
                     <div className="stat-row"><div className="label">Rating</div><div className="value stars">{Array.from({length:5}).map((_,i)=>(<i key={i} className={`fa-star ${i < Math.round(p.rating) ? 'fa-solid' : 'fa-regular'}`} />))} <span className="rating-num">{p.rating}</span></div></div>
                     <div className="stat-row"><div className="label">Last Load</div><div className="value">{p.lastLoad}</div></div>
-                  </div>
 
                   <div className="divider" />
 
@@ -478,7 +796,7 @@ export default function ShipperPartners(){
               onClick={() => setInviteTab('incoming')}
             >
               <span className="icon"><i className="fa-solid fa-inbox" /></span>
-              Incoming Invites <span className="count">{invites.length}</span>
+              Incoming Invites <span className="count">{pendingInvitesCount}</span>
             </button>
 
             <button
@@ -486,21 +804,39 @@ export default function ShipperPartners(){
               onClick={() => setInviteTab('requests')}
             >
               <span className="icon"><i className="fa-solid fa-paper-plane" /></span>
-              My Requests <span className="count">3</span>
+              My Requests <span className="count">{outgoingRequests.length}</span>
             </button>
           </div>
 
           <div className="invites-controls">
-            <input className="inv-search" placeholder="Search by name, DOT/MC #, region" />
-            <select className="inv-select">
-              <option>All Status</option>
-              <option>Pending</option>
-              <option>Accepted</option>
+            <input
+              className="inv-search"
+              placeholder="Search invites by name, email, phone, location"
+              value={inviteQuery}
+              onChange={(e) => setInviteQuery(e.target.value)}
+              disabled={inviteTab !== 'incoming'}
+            />
+            <select
+              className="inv-select"
+              value={inviteStatusFilter}
+              onChange={(e) => setInviteStatusFilter(e.target.value)}
+              disabled={inviteTab !== 'incoming'}
+            >
+              <option value="all">All Status</option>
+              <option value="pending">Pending</option>
+              <option value="accepted">Accepted</option>
+              <option value="declined">Declined</option>
             </select>
-            <select className="inv-select">
-              <option>All Regions</option>
-              <option>West</option>
-              <option>South</option>
+            <select
+              className="inv-select"
+              value={inviteRegionFilter}
+              onChange={(e) => setInviteRegionFilter(e.target.value)}
+              disabled={inviteTab !== 'incoming' || inviteStates.length === 0}
+            >
+              <option value="all">All Regions</option>
+              {inviteStates.map(st => (
+                <option key={st} value={st}>{st}</option>
+              ))}
             </select>
             <div className="inv-actions">
               <button className="icon-btnn" aria-label="filters"><i className="fa-solid fa-sliders" /></button>
@@ -514,12 +850,12 @@ export default function ShipperPartners(){
               <p>Loading invitations...</p>
             </div>
           ) : (
-            (inviteTab === 'incoming' ? (invites.length > 0 ? invites : mockInvites) : requests).map(inv => (
+            filteredInviteList.map(inv => (
             <div className="invite-card card" key={inv.id} data-type={inviteTab === 'incoming' ? 'incoming' : 'request'}>
               <div className="invite-row" style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12}}>
                 <div style={{display:'flex',alignItems:'center',gap:12}}>
                   <div className="avatar square" style={{width:48,height:48,borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',overflow:'hidden'}}>
-                    <img src={avatarUrls[inv.id % avatarUrls.length]} alt={`${inv.name} avatar`} style={{width:'100%',height:'100%',objectFit:'cover'}} />
+                    <img src={avatarForKey(inv.id)} alt={`${inv.name} avatar`} style={{width:'100%',height:'100%',objectFit:'cover'}} />
                   </div>
                   <div>
                     <div style={{display:'flex',alignItems:'center',gap:10}}>
@@ -527,201 +863,162 @@ export default function ShipperPartners(){
                       {/* add a normalized class from the badge text so we can target variants in CSS */}
                       <div className={`invite-badge ${inv.badge ? inv.badge.toLowerCase().replace(/\s+/g,'-') : ''}`}>{inv.badge}</div>
                     </div>
-                    <div className="muted" style={{fontSize:13,marginTop:6}}>DOT: {inv.dot} &nbsp; MC: {inv.mc} &nbsp; • &nbsp; {inv.email} &nbsp; • &nbsp; <span className="phone muted">{inv.phone}</span></div>
+                    <div className="muted" style={{fontSize:13,marginTop:6}}>
+                      {inv.type ? `${inv.type} · ` : ''}
+                      {inv.email ? inv.email : 'No email'}
+                      {inv.phone ? ` · ${inv.phone}` : ''}
+                      {inv.city || inv.state ? ` · ${[inv.city, inv.state].filter(Boolean).join(', ')}` : ''}
+                    </div>
                   </div>
                 </div>
 
                   <div className="invite-right" style={{display:'flex',alignItems:'center',gap:8}}>
                   <div className="invite-stars" style={{display:'flex',alignItems:'center',gap:6,marginRight:12}}>
-                    {Array.from({length:5}).map((_,i)=> (
-                      <i key={i} className={`fa-star ${i < Math.round(inv.rating) ? 'fa-solid' : 'fa-regular'}`} style={{color:'#fbbf24'}} />
-                    ))}
-                    <div className="muted" style={{marginLeft:8}}>{inv.rating} Rating</div>
-                  </div>
-                  <div className="invite-action-desktop" style={{gap:8}}>
-                    {inviteTab === 'incoming' ? (
+                    {typeof inv.rating === 'number' && inv.rating > 0 ? (
                       <>
-                        <button className="btn small ghost-cd">View Profile</button>
-                        <button 
-                          className="btn small ghost-cd" 
-                          style={{color: '#c51313ff'}}
-                          onClick={() => handleDeclineInvite(inv.invitationId)}
-                        >
-                          Decline
-                        </button>
-                        <button 
-                          className="btn small-cd"
-                          onClick={() => handleAcceptInvite(inv.invitationId)}
-                        >
-                          Accept
-                        </button>
+                        {Array.from({length:5}).map((_,i)=> (
+                          <i key={i} className={`fa-star ${i < Math.round(inv.rating) ? 'fa-solid' : 'fa-regular'}`} style={{color:'#fbbf24'}} />
+                        ))}
+                        <div className="muted" style={{marginLeft:8}}>{inv.rating} Rating</div>
                       </>
                     ) : (
-                      <>
-                        <button className="btn small ghost-cd">View Profile</button>
-                        <button className="btn small ghost-cd" style={{color: '#c51313ff'}}>Withdraw</button>
-                        <button className="btn small-cd" >Message</button>
-                      </>
+                      <div className="muted">No rating</div>
                     )}
+                  </div>
+                  <div className="invite-action-desktop" style={{gap:8}}>
+                    <>
+                      <button className="btn small ghost-cd" onClick={() => openPartnerProfile(inv.shipperId)}>View Profile</button>
+                      <button 
+                        className="btn small ghost-cd" 
+                        style={{color: '#c51313ff'}}
+                        onClick={() => handleDeclineInvite(inv.invitationId)}
+                      >
+                        Decline
+                      </button>
+                      <button 
+                        className="btn small-cd"
+                        onClick={() => handleAcceptInvite(inv.invitationId)}
+                      >
+                        Accept
+                      </button>
+                    </>
                   </div>
                 </div>
               </div>
 
               <div className="invite-message">
-                <div className="invite-message-text">{inv.message}</div>
+                <div className="invite-message-text">{inv.message || 'No message provided.'}</div>
               </div>
 
               <div className="invite-meta" style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:10}}>
                 <div style={{display:'flex',alignItems:'center',gap:12}}>
                   <div className="muted">Received {inv.received}</div>
                   <div className="invite-action-mobile">
-                    {inviteTab === 'incoming' ? (
-                      <>
-                        <button className="btn small ghost-cd">View Profile</button>
-                        <button 
-                          className="btn small ghost-cd" 
-                          style={{borderColor:'#fdecea',color:'#ef4444'}}
-                          onClick={() => handleDeclineInvite(inv.invitationId)}
-                        >
-                          Decline
-                        </button>
-                        <button 
-                          className="btn small ghost-cd"
-                          onClick={() => handleAcceptInvite(inv.invitationId)}
-                        >
-                          Accept
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button className="btn small ghost-cd">View Profile</button>
-                        <button className="btn small ghost-cd" style={{borderColor:'#fdecea',color:'#ef4444'}}>Withdraw</button>
-                        <button className="btn small ghost-cd">Message</button>
-                      </>
-                    )}
+                    <>
+                      <button className="btn small ghost-cd" onClick={() => openPartnerProfile(inv.shipperId)}>View Profile</button>
+                      <button 
+                        className="btn small ghost-cd" 
+                        style={{borderColor:'#fdecea',color:'#ef4444'}}
+                        onClick={() => handleDeclineInvite(inv.invitationId)}
+                      >
+                        Decline
+                      </button>
+                      <button 
+                        className="btn small ghost-cd"
+                        onClick={() => handleAcceptInvite(inv.invitationId)}
+                      >
+                        Accept
+                      </button>
+                    </>
                   </div>
                 </div>
-                <div className="muted">Expires in {inv.expires}</div>
+                <div className="muted" />
               </div>
 
               {/* Bottom action bar shown when sidebar collapses (mobile/tablet compact view) */}
               <div className="invite-actions-bottom" style={{marginTop:12}}>
                 {/* Mobile-only rating shown above buttons at very small widths (<=400px) */}
                 <div className="invite-rating mobile-only" style={{display:'none',alignItems:'center',gap:8,marginBottom:8}}>
-                  {Array.from({length:5}).map((_,i)=> (
-                    <i key={i} className={`fa-star ${i < Math.round(inv.rating) ? 'fa-solid' : 'fa-regular'}`} style={{color:'#fbbf24'}} />
-                  ))}
-                  <div className="muted" style={{marginLeft:8}}>{inv.rating} Rating</div>
+                  {typeof inv.rating === 'number' && inv.rating > 0 ? (
+                    <>
+                      {Array.from({length:5}).map((_,i)=> (
+                        <i key={i} className={`fa-star ${i < Math.round(inv.rating) ? 'fa-solid' : 'fa-regular'}`} style={{color:'#fbbf24'}} />
+                      ))}
+                      <div className="muted" style={{marginLeft:8}}>{inv.rating} Rating</div>
+                    </>
+                  ) : (
+                    <div className="muted">No rating</div>
+                  )}
                 </div>
-                {inviteTab === 'incoming' ? (
-                  <>
-                    <button className="btn small ghost-cd" style={{flex:1,marginRight:8}}>View Profile</button>
-                    <button 
-                      className="btn small ghost-cd" 
-                      style={{flex:1,marginRight:8,color: '#c51313ff'}}
-                      onClick={() => handleDeclineInvite(inv.invitationId)}
-                    >
-                      Decline
-                    </button>
-                    <button 
-                      className="btn small-cd" 
-                      style={{flex:1}}
-                      onClick={() => handleAcceptInvite(inv.invitationId)}
-                    >
-                      Accept
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button className="btn small ghost-cd" style={{flex:1,marginRight:8}}>View Profile</button>
-                    <button className="btn small ghost-cd" style={{flex:1,marginRight:8,color: '#c51313ff'}}>Withdraw</button>
-                    <button className="btn small-cd" style={{flex:1}}>Message</button>
-                  </>
-                )}
+                <>
+                  <button className="btn small ghost-cd" style={{flex:1,marginRight:8}} onClick={() => openPartnerProfile(inv.shipperId)}>View Profile</button>
+                  <button 
+                    className="btn small ghost-cd" 
+                    style={{flex:1,marginRight:8,color: '#c51313ff'}}
+                    onClick={() => handleDeclineInvite(inv.invitationId)}
+                  >
+                    Decline
+                  </button>
+                  <button 
+                    className="btn small-cd" 
+                    style={{flex:1}}
+                    onClick={() => handleAcceptInvite(inv.invitationId)}
+                  >
+                    Accept
+                  </button>
+                </>
               </div>
             </div>
             ))
+          )}
+
+          {!loadingInvites && inviteTab === 'incoming' && errorInvites && (
+            <div style={{ padding: '16px 0', color: '#6b7280' }}>{errorInvites}</div>
+          )}
+
+          {!loadingInvites && inviteTab === 'incoming' && !errorInvites && pendingInvitesCount === 0 && inviteStatusFilter === 'pending' && (
+            <div style={{ padding: '24px', color: '#6b7280' }}>No pending invitations.</div>
+          )}
+
+          {!loadingInvites && inviteTab === 'incoming' && !errorInvites && listForInviteTab.length > 0 && filteredInviteList.length === 0 && (
+            <div style={{ padding: '24px', color: '#6b7280' }}>No invites match your filters.</div>
+          )}
+
+          {!loadingInvites && inviteTab === 'requests' && outgoingRequests.length === 0 && (
+            <div style={{ padding: '24px', color: '#6b7280' }}>No outgoing requests.</div>
+          )}
+
+          {!loadingInvites && inviteTab === 'requests' && outgoingRequests.length > 0 && filteredInviteList.length === 0 && (
+            <div style={{ padding: '24px', color: '#6b7280' }}>No requests match your filters.</div>
           )}
 
           {/* Invites stats summary cards (end of invites screen) */}
           <div className="invites-stats">
             <div className="cd-stat-card card">
               <div className="stat-left"><div className="icon-box pending"><i className="fa-solid fa-inbox" /></div></div>
-              <div className="stat-right"><div className="stat-num">5</div><div className="stat-label">Pending Invites</div></div>
+              <div className="stat-right"><div className="stat-num">{pendingInvitesCount}</div><div className="stat-label">Pending Invites</div></div>
             </div>
 
             <div className="cd-stat-card card">
               <div className="stat-left"><div className="icon-box accepted"><i className="fa-solid fa-check-circle" /></div></div>
-              <div className="stat-right"><div className="stat-num">12</div><div className="stat-label">Accepted This Month</div></div>
+              <div className="stat-right"><div className="stat-num">{acceptedThisMonthCount}</div><div className="stat-label">Accepted This Month</div></div>
             </div>
 
             <div className="cd-stat-card card">
               <div className="stat-left"><div className="icon-box sent"><i className="fa-solid fa-paper-plane" /></div></div>
-              <div className="stat-right"><div className="stat-num">3</div><div className="stat-label">Requests Sent</div></div>
+              <div className="stat-right"><div className="stat-num">{requestsSentCount}</div><div className="stat-label">Requests Sent</div></div>
             </div>
 
             <div className="cd-stat-card card">
               <div className="stat-left"><div className="icon-box active"><i className="fa-solid fa-handshake" /></div></div>
-              <div className="stat-right"><div className="stat-num">45</div><div className="stat-label">Active Partners</div></div>
+              <div className="stat-right"><div className="stat-num">{activePartnersCount}</div><div className="stat-label">Active Partners</div></div>
             </div>
           </div>
         </div>
       ) : activeTab === 'history' ? (
         <div className="document-history">
-          {/* Document History controls */}
-          <div className="doc-controls">
-            <input className="doc-search" placeholder="Search documents..." />
-            <select className="doc-select">
-              <option>All Document Types</option>
-              <option>Proof of Delivery</option>
-              <option>Rate Confirmation</option>
-              <option>Bill of Lading</option>
-              <option>Insurance</option>
-              <option>Contracts</option>
-            </select>
-            <select className="doc-select">
-              <option>All Statuses</option>
-              <option>Signed</option>
-              <option>Pending</option>
-              <option>Executed</option>
-              <option>Valid</option>
-            </select>
-            <div className="doc-meta">Showing 24 documents from last 90 days</div>
-          </div>
-
-          {/* Document list */}
-          <div className="doc-list">
-            {documents.map(doc => (
-              <div className="cd-doc-item" key={doc.id}>
-                <div className="cd-doc-left">
-                  <div className={`cd-doc-icon cd-doc-icon-${doc.type}`}>
-                    <i className={`fa-solid ${doc.icon}`} />
-                  </div>
-                  <div className="cd-doc-info">
-                    <div className="cd-doc-title">{doc.title}</div>
-                    <div className="cd-doc-meta-row">
-                      <span className="cd-doc-uploaded">Uploaded: {doc.uploaded}</span>
-                      <span className="cd-doc-by">By: {doc.by}</span>
-                      <span className="cd-doc-size">Size: {doc.size}</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="cd-doc-right">
-                  <div className={`cd-doc-status cd-doc-status-${doc.status.toLowerCase().replace(/\s+/g, '-')}`}>
-                    {doc.status}
-                  </div>
-                  <div className="cd-doc-actions">
-                    <button className="cd-doc-action-btn" title="View"><i className="fa-solid fa-eye" /></button>
-                    <button className="cd-doc-action-btn" title="Download"><i className="fa-solid fa-download" /></button>
-                    <button className="cd-doc-action-btn" title="Share"><i className="fa-solid fa-share" /></button>
-                  </div>
-                </div>
-              </div>
-            ))}
-            
-            <div className="load-more">
-              <button className="btn small ghost-cd">+ Load More Documents</button>
-            </div>
+          <div style={{ padding: '24px', color: '#6b7280' }}>
+            Document history is not available yet.
           </div>
         </div>
       ) : (
@@ -739,16 +1036,189 @@ export default function ShipperPartners(){
           {rows}
 
           <div className="list-footer">
-            <div className="meta">Showing {filtered.length} of {partners.length} partners</div>
+            <div className="meta">
+              {filtered.length === 0
+                ? `Showing 0 of ${localPartners.length} partners`
+                : `Showing ${Math.min(startIdx + 1, filtered.length)}-${Math.min(endIdxExclusive, filtered.length)} of ${filtered.length} partners`}
+            </div>
             <div className="pager">
-              <button className="page">Previous</button>
-              <button className="page active">1</button>
-              <button className="page">2</button>
-              <button className="page">Next</button>
+              <button
+                className="page"
+                disabled={safePartnersPage <= 1}
+                onClick={() => setPartnersPage(Math.max(1, safePartnersPage - 1))}
+                type="button"
+              >
+                Previous
+              </button>
+
+              {Array.from({ length: totalPartnerPages }, (_, i) => i + 1).map(pn => (
+                <button
+                  key={pn}
+                  className={`page ${pn === safePartnersPage ? 'active' : ''}`}
+                  onClick={() => setPartnersPage(pn)}
+                  type="button"
+                >
+                  {pn}
+                </button>
+              ))}
+
+              <button
+                className="page"
+                disabled={safePartnersPage >= totalPartnerPages}
+                onClick={() => setPartnersPage(Math.min(totalPartnerPages, safePartnersPage + 1))}
+                type="button"
+              >
+                Next
+              </button>
             </div>
           </div>
         </div>
       )}
+
+      {profileModalOpen && (
+        <div
+          onClick={closeProfileModal}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+            zIndex: 9000,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'white',
+              borderRadius: 12,
+              width: 'min(720px, 100%)',
+              maxHeight: '85vh',
+              overflow: 'auto',
+              border: '1px solid #e5e7eb',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottom: '1px solid #e5e7eb' }}>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#111827' }}>Partner Profile</div>
+                <div style={{ marginTop: 2, color: '#6b7280', fontSize: 13 }}>{profileLoading ? 'Loading…' : ''}</div>
+              </div>
+              <button className="btn small ghost-cd" onClick={closeProfileModal} type="button">Close</button>
+            </div>
+
+            <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {profileError && (
+                <div style={{ padding: 10, background: '#fee2e2', color: '#991b1b', borderRadius: 8 }}>{profileError}</div>
+              )}
+
+              {!profileError && !profileLoading && !profileData && (
+                <div style={{ color: '#6b7280' }}>No profile data found.</div>
+              )}
+
+              {profileData && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <Info label="Name" value={String(profileData.display_name || 'N/A')} />
+                  <Info label="Company" value={String(profileData.company_name || 'N/A')} />
+                  <Info label="Role" value={String(profileData.role || 'N/A')} />
+                  <Info label="Email" value={String(profileData.email || 'N/A')} />
+                  <Info label="Phone" value={String(profileData.phone || 'N/A')} />
+                  <Info
+                    label="Address"
+                    value={
+                      [profileData.address, profileData.city, profileData.state, profileData.zip, profileData.country]
+                        .filter(Boolean)
+                        .join(', ') || 'N/A'
+                    }
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {docsModalOpen && (
+        <div
+          onClick={closeDocsModal}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+            zIndex: 9000,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'white',
+              borderRadius: 12,
+              width: 'min(960px, 100%)',
+              maxHeight: '85vh',
+              overflow: 'auto',
+              border: '1px solid #e5e7eb',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottom: '1px solid #e5e7eb' }}>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#111827' }}>Partner Documents</div>
+                <div style={{ marginTop: 2, color: '#6b7280', fontSize: 13 }}>{docsPartner?.name ? `Partner: ${docsPartner.name}` : ''}</div>
+              </div>
+              <button className="btn small ghost-cd" onClick={closeDocsModal} type="button">Close</button>
+            </div>
+
+            <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {docsLoadsError && (
+                <div style={{ padding: 10, background: '#fee2e2', color: '#991b1b', borderRadius: 8 }}>{docsLoadsError}</div>
+              )}
+
+              {docsLoadsLoading ? (
+                <div style={{ color: '#6b7280' }}>Loading loads…</div>
+              ) : docsLoads.length === 0 ? (
+                <div style={{ color: '#6b7280' }}>No loads found for this partner.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {docsLoads.map(l => {
+                    const loadId = String(l?.load_id || l?.id || '').trim()
+                    const loadNumber = String(l?.load_number || '').trim() || loadId
+                    return (
+                      <div key={loadId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: 10, border: '1px solid #e5e7eb', borderRadius: 10 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 800, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{loadNumber}</div>
+                          <div style={{ color: '#6b7280', fontSize: 13, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {String(l?.origin || 'N/A')} → {String(l?.destination || 'N/A')} · {String(l?.status || 'N/A')}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                          <button className="btn small ghost-cd" type="button" onClick={() => setDetailsLoad({ load_id: loadId })} disabled={!loadId}>
+                            View Docs
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {detailsLoad && <LoadDetailsModal load={detailsLoad} onClose={() => setDetailsLoad(null)} />}
+    </div>
+  )
+}
+
+function Info({ label, value }) {
+  return (
+    <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, padding: 10 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: '#6b7280' }}>{label}</div>
+      <div style={{ marginTop: 4, color: '#111827', fontWeight: 700, wordBreak: 'break-word' }}>{value}</div>
     </div>
   )
 }
