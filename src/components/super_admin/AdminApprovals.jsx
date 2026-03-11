@@ -51,7 +51,7 @@ export default function AdminApprovals() {
 
   useEffect(() => {
     fetchPending();
-     
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const approve = async (req) => {
