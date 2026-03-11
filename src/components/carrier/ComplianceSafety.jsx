@@ -5,7 +5,7 @@ import '../../styles/carrier/ComplianceSafety.css';
 
 export default function ComplianceSafety() {
   const { currentUser } = useAuth();
-  const [selectedTask, setSelectedTask] = useState(null);
+  const [_selectedTask, _setSelectedTask] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState('');
   const [syncSuccess, setSyncSuccess] = useState('');

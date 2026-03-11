@@ -58,7 +58,7 @@ const HelpHub = () => {
   const [selectedPriority, setSelectedPriority] = useState('All Priority');
   const [searchTickets, setSearchTickets] = useState('');
   const [searchResources, setSearchResources] = useState('');
-  const [calendarView, setCalendarView] = useState('Monthly');
+  const [_calendarView, _setCalendarView] = useState('Monthly');
   const [conversationId, setConversationId] = useState('');
   const [messages, setMessages] = useState([
     {

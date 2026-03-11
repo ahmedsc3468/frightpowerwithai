@@ -48,9 +48,9 @@ export default function DocumentVault({ isPostHire, setIsPostHire, onNavigate })
   const [tripUploadSuccess, setTripUploadSuccess] = useState('');
   const [complianceScore, setComplianceScore] = useState(null);
   const [showDocumentsModal, setShowDocumentsModal] = useState(false);
-  const [viewingDocument, setViewingDocument] = useState(null);
+  const [_viewingDocument, _setViewingDocument] = useState(null);
   const [replacingDocId, setReplacingDocId] = useState(null);
-  const [bulkFiles, setBulkFiles] = useState([]);
+  const [_bulkFiles, _setBulkFiles] = useState([]);
   const [documentFilter, setDocumentFilter] = useState('all');
   const [requiredDocs, setRequiredDocs] = useState(null);
   const [consentInfo, setConsentInfo] = useState({ eligible: false, marketplace_eligible: false, missing_consents: [] });

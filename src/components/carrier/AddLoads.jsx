@@ -638,8 +638,10 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                                      formData.equipmentType === 'Reefer' ? 'reefer' :
                                      formData.equipmentType === 'Flatbed' ? 'flatbed' : 'dryVan'}
                           onRouteCalculated={(data) => {
-                            setEstimatedDistance(data.distance_miles);
-                            setEstimatedTransitTime(data.duration_hours);
+                            if (data) {
+                              setEstimatedDistance(data.distance_miles ?? null);
+                              setEstimatedTransitTime(data.duration_hours ?? null);
+                            }
                           }}
                           height="300px"
                         />

@@ -7,7 +7,7 @@ export default function DocumentVault() {
   const { currentUser } = useAuth();
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [_error, _setError] = useState('');
 
   // 1. Fetch REAL Documents from Backend on Load
   useEffect(() => {

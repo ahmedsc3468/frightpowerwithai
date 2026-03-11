@@ -388,7 +388,7 @@ export default function DriverDashboard() {
   const [pickupCompleted, setPickupCompleted] = useState(false);
   const [deliveryCompleted, setDeliveryCompleted] = useState(false);
   const [currentLocation, setCurrentLocation] = useState(null);
-  const [distanceLeft, setDistanceLeft] = useState(0);
+  const [_distanceLeft, _setDistanceLeft] = useState(0);
   const [distanceToPickup, setDistanceToPickup] = useState(0);
   const [distanceToDelivery, setDistanceToDelivery] = useState(0);
   const [gpsPermissionGranted, setGpsPermissionGranted] = useState(false);

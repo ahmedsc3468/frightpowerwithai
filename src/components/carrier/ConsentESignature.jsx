@@ -7,10 +7,10 @@ export default function ConsentESignature() {
   const [selectedCategory, setSelectedCategory] = useState('All Categories');
   
   // Active Signatures state
-  const [documentSearch, setDocumentSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('All Status');
-  const [documentTypeFilter, setDocumentTypeFilter] = useState('All Document Types');
-  const [dateFilter, setDateFilter] = useState('');
+  const [_documentSearch, _setDocumentSearch] = useState('');
+  const [_statusFilter, _setStatusFilter] = useState('All Status');
+  const [_documentTypeFilter, _setDocumentTypeFilter] = useState('All Document Types');
+  const [_dateFilter, _setDateFilter] = useState('');
   const [currentPage, _setCurrentPage] = useState(1);
   const [selectAll, setSelectAll] = useState(false);
   const [selectedDocuments, setSelectedDocuments] = useState([]);
