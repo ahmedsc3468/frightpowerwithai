@@ -1,5 +1,3 @@
-import { getNavigate } from './navigateService';
-
 const SESSION_ID_KEY = 'fp_session_id';
 
 // Used to avoid spamming signOut/redirect loops.
@@ -61,11 +59,7 @@ export async function forceLogoutToLogin(reason = 'session_revoked') {
     const qs = new URLSearchParams();
     if (reason) qs.set('reason', String(reason));
     const next = `${loginRoute}${qs.toString() ? `?${qs.toString()}` : ''}`;
-
-    const navigate = getNavigate();
-    if (navigate) {
-      navigate(next, { replace: true });
-    } else if (String(window?.location?.pathname || '') !== loginRoute) {
+    if (String(window?.location?.pathname || '') !== loginRoute) {
       window.location.assign(next);
     } else {
       // Already on login page; still refresh state.
