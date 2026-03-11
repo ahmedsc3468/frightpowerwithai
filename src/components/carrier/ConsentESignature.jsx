@@ -11,7 +11,7 @@ export default function ConsentESignature() {
   const [statusFilter, setStatusFilter] = useState('All Status');
   const [documentTypeFilter, setDocumentTypeFilter] = useState('All Document Types');
   const [dateFilter, setDateFilter] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
+  const [currentPage, _setCurrentPage] = useState(1);
   const [selectAll, setSelectAll] = useState(false);
   const [selectedDocuments, setSelectedDocuments] = useState([]);
 
@@ -199,7 +199,7 @@ export default function ConsentESignature() {
   ];
 
   const itemsPerPage = 5;
-  const totalPages = Math.ceil(activeDocuments.length / itemsPerPage);
+  const _totalPages = Math.ceil(activeDocuments.length / itemsPerPage);
   const currentDocuments = activeDocuments.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   const handleSelectAll = () => {
@@ -219,7 +219,7 @@ export default function ConsentESignature() {
     }
   };
 
-  const getColorClass = (color) => {
+  const _getColorClass = (color) => {
     const colorMap = {
       blue: 'template-blue',
       green: 'template-green',

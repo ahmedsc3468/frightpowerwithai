@@ -3,11 +3,11 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { API_URL } from '../../config';
 
-export default function OnboardingCoach({ documents = [] }) {
-  const { currentUser, userRole } = useAuth();
+export default function OnboardingCoach({ documents: _documents = [] }) {
+  const { currentUser, userRole: _userRole } = useAuth();
   const navigate = useNavigate();
 
-  const [coachData, setCoachData] = useState(null);
+  const [_coachData, setCoachData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [score, setScore] = useState(0);
   const [status, setStatus] = useState('Red'); // Red, Amber, Green

@@ -57,7 +57,7 @@ export default function ShipperPartners(){
   const partnersPageSize = 10
   const [partners, setPartners] = useState([])
   const [invites, setInvites] = useState([])
-  const [outgoingRequests, setOutgoingRequests] = useState([])
+  const [outgoingRequests, _setOutgoingRequests] = useState([])
   const [loading, setLoading] = useState(true)
   const [loadingInvites, setLoadingInvites] = useState(true)
   const [errorPartners, setErrorPartners] = useState('')
@@ -67,7 +67,7 @@ export default function ShipperPartners(){
       const raw = localStorage.getItem(FAVORITES_STORAGE_KEY)
       const arr = JSON.parse(raw || '[]')
       if (Array.isArray(arr)) return new Set(arr.map(String))
-    } catch (e) {
+    } catch (_e) {
       // ignore
     }
     return new Set()
@@ -301,7 +301,7 @@ export default function ShipperPartners(){
   useEffect(() => {
     try {
       localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(Array.from(favoriteIds)))
-    } catch (e) {
+    } catch (_e) {
       // ignore
     }
   }, [favoriteIds])
@@ -771,6 +771,7 @@ export default function ShipperPartners(){
                     <div className="stat-row"><div className="label">On-time Rate</div><div className="value green">{p.onTime}</div></div>
                     <div className="stat-row"><div className="label">Rating</div><div className="value stars">{Array.from({length:5}).map((_,i)=>(<i key={i} className={`fa-star ${i < Math.round(p.rating) ? 'fa-solid' : 'fa-regular'}`} />))} <span className="rating-num">{p.rating}</span></div></div>
                     <div className="stat-row"><div className="label">Last Load</div><div className="value">{p.lastLoad}</div></div>
+                  </div>
 
                   <div className="divider" />
 

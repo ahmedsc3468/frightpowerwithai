@@ -34,7 +34,7 @@ export default function AdminDashboard() {
 
   const [activeNav, setActiveNav] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isSidebarDark, setIsSidebarDark] = useState(false);
+  const [isSidebarDark, _setIsSidebarDark] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
 
   const [adminProfile, setAdminProfile] = useState(null);
@@ -138,7 +138,7 @@ export default function AdminDashboard() {
         const me = await getJson('/auth/me', { requestLabel: 'GET /auth/me (admin)' });
         if (!mounted) return;
         setAdminProfile(me || null);
-      } catch (e) {
+      } catch (_e) {
         // Fallbacks will be used if this fails.
         if (!mounted) return;
         setAdminProfile(null);
@@ -231,7 +231,7 @@ export default function AdminDashboard() {
 
         setRecentUnreadThreads(unread);
         setNotifUnread(Number(notifResp?.unread_count || 0));
-      } catch (e) {
+      } catch (_e) {
         if (cancelled) return;
         setRecentUnreadThreads([]);
       } finally {
@@ -292,7 +292,7 @@ export default function AdminDashboard() {
     setUserModalOpen(true);
   };
 
-  const handleLogoutQuick = async () => {
+  const _handleLogoutQuick = async () => {
     try {
       await logout();
     } finally {

@@ -4,6 +4,9 @@
    You must set VITE_FIREBASE_VAPID_KEY in your frontend env for token registration.
 */
 
+/* eslint-env serviceworker */
+/* global firebase */
+
 // Use compat builds in the service worker for broad compatibility.
 // Version does not need to match the app exactly; it must support messaging.
 importScripts('https://www.gstatic.com/firebasejs/10.12.4/firebase-app-compat.js');

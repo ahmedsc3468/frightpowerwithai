@@ -48,7 +48,7 @@ export default function CarrierDashboard() {
   const [initialThreadId, setInitialThreadId] = useState(null);
   const [activeMarketplaceSection, setActiveMarketplaceSection] = useState('loads');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isSidebarDark, setIsSidebarDark] = useState(false);
+  const [isSidebarDark, _setIsSidebarDark] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
 
   // Messaging unread badge
@@ -60,9 +60,9 @@ export default function CarrierDashboard() {
 
   // Notifications state
   const [notifOpen, setNotifOpen] = useState(false);
-  const [notifLoading, setNotifLoading] = useState(false);
+  const [_notifLoading, setNotifLoading] = useState(false);
   const [notifUnread, setNotifUnread] = useState(0);
-  const [notifItems, setNotifItems] = useState([]);
+  const [_notifItems, setNotifItems] = useState([]);
   const [latestNotifications, setLatestNotifications] = useState([]);
 
   // Deep-link support (email links): /carrier-dashboard?nav=messaging&thread=<threadId>
@@ -487,7 +487,7 @@ export default function CarrierDashboard() {
     }
   };
 
-  const handleNotifToggle = async () => {
+  const _handleNotifToggle = async () => {
     const next = !notifOpen;
     setNotifOpen(next);
     if (next) {

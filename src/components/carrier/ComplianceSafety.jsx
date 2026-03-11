@@ -9,7 +9,7 @@ export default function ComplianceSafety() {
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState('');
   const [syncSuccess, setSyncSuccess] = useState('');
-  const [lastSyncTime, setLastSyncTime] = useState(null);
+  const [_lastSyncTime, setLastSyncTime] = useState(null);
   const [loading, setLoading] = useState(true);
   const [aiAnalysis, setAiAnalysis] = useState(null);
   const [analyzingAI, setAnalyzingAI] = useState(false);

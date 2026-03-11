@@ -16,6 +16,7 @@ import { clearSessionId } from "../utils/session";
 
 const AuthContext = React.createContext();
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   return useContext(AuthContext);
 }
@@ -59,7 +60,7 @@ export function AuthProvider({ children }) {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
         return raw ? JSON.parse(raw) : null;
-      } catch (e) {
+      } catch (_e) {
         return null;
       }
     }
@@ -67,7 +68,7 @@ export function AuthProvider({ children }) {
     function writeLast(obj) {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
-      } catch (e) {}
+      } catch (_e) { /* ignore localStorage errors in private browsing */ }
     }
 
     async function sendGps(lat, lng) {
@@ -84,7 +85,7 @@ export function AuthProvider({ children }) {
             gps_lng: lng,
           })
         });
-      } catch (e) {
+      } catch (_e) {
         // best-effort: ignore
       }
     }
@@ -175,7 +176,7 @@ export function AuthProvider({ children }) {
     // Admins should not use the public /login + SMS OTP flow.
     // Admins/super admins authenticate via /admin/login or /super-admin/login (email MFA + custom token).
     if (role === 'admin' || role === 'super_admin') {
-      try { await signOut(auth); } catch (e) {}
+      try { await signOut(auth); } catch (_e) { /* ignore sign-out errors */ }
       return {
         user: null,
         mfaRequired: false,
@@ -236,7 +237,7 @@ export function AuthProvider({ children }) {
 
   function setupRecaptcha(elementId) {
     if (window.recaptchaVerifier) {
-      try { window.recaptchaVerifier.clear(); } catch (e) {}
+      try { window.recaptchaVerifier.clear(); } catch (_e) { /* ignore recaptcha clear errors */ }
       window.recaptchaVerifier = null;
     }
     // Ensure the element exists in DOM before attaching

@@ -52,7 +52,7 @@ export default function MyCarrier() {
   const podIframeRef = useRef(null);
 
   // Compliance + consents
-  const [complianceLoading, setComplianceLoading] = useState(false);
+  const [_complianceLoading, setComplianceLoading] = useState(false);
   const [complianceError, setComplianceError] = useState('');
   const [compliance, setCompliance] = useState(null);
   const [consentEligibility, setConsentEligibility] = useState({ eligible: false, missing_consents: [] });
@@ -63,7 +63,7 @@ export default function MyCarrier() {
   // Messaging (Communication Hub)
   const [messagingLoading, setMessagingLoading] = useState(false);
   const [messagingError, setMessagingError] = useState('');
-  const [messagingThreads, setMessagingThreads] = useState([]);
+  const [_messagingThreads, setMessagingThreads] = useState([]);
   const [commThread, setCommThread] = useState(null);
 
   // Quick actions
@@ -280,7 +280,7 @@ export default function MyCarrier() {
       const list = Array.isArray(data?.documents) ? data.documents : (Array.isArray(data) ? data : []);
       setDriverDocs(list);
       return list;
-    } catch (e) {
+    } catch (_e) {
       return [];
     }
   };
@@ -568,7 +568,7 @@ export default function MyCarrier() {
       const now = new Date();
       setScheduleMonth(new Date(now.getFullYear(), now.getMonth(), 1));
       setSelectedScheduleDay(new Date(now.getFullYear(), now.getMonth(), now.getDate()));
-    } catch (e) {
+    } catch (_e) {
       setScheduleError(tr('myCarrier.schedule.error.loadDataFailed', 'Failed to load schedule data'));
     } finally {
       setScheduleLoading(false);
@@ -669,7 +669,7 @@ export default function MyCarrier() {
       if (first?.lat != null && first?.lng != null) {
         setPodDestinationCoords({ lat: first.lat, lng: first.lng, label: first.label || destinationText });
       }
-    } catch (e) {
+    } catch (_e) {
       // ignore; user can still try to proceed but GPS check will fail.
     }
   };

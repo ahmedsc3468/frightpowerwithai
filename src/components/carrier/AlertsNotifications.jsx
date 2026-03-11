@@ -12,7 +12,7 @@ const AlertsNotifications = () => {
   const [statusFilter, setStatusFilter] = useState('All Status');
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [unreadCount, setUnreadCount] = useState(0);
+  const [_unreadCount, setUnreadCount] = useState(0);
   const [exporting, setExporting] = useState(false);
 
   const [settingsLoading, setSettingsLoading] = useState(false);

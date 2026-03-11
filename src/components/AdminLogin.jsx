@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { signInWithCustomToken, signOut } from 'firebase/auth'
+import { signInWithCustomToken } from 'firebase/auth'
 import { auth } from '../firebase'
 import Toast from './common/Toast'
 import { API_URL } from '../config'

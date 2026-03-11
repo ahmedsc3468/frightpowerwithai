@@ -442,7 +442,7 @@ export default function Settings() {
       setMessage({ type: 'error', text: err?.message || 'Failed to upload logo' });
     } finally {
       setUploadingLogo(false);
-      try { e.target.value = ''; } catch {}
+      try { e.target.value = ''; } catch { /* ignore if input already removed */ }
     }
   };
 

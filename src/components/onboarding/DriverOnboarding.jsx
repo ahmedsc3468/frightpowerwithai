@@ -14,7 +14,7 @@ export default function DriverOnboarding(){
   const navigate = useNavigate()
   const { currentUser } = useAuth()
   const images = [carrier_ob_1, carrier_ob_2, carrier_ob_3]
-  const [currentImg, setCurrentImg] = useState(0)
+  const [_currentImg, setCurrentImg] = useState(0)
   const [isChatOpen, setIsChatOpen] = useState(false)
   const [currentStep, setCurrentStep] = useState(1)
   const [saving, setSaving] = useState(false)

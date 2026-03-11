@@ -108,7 +108,7 @@ export default function InviteCarrierModal({ isOpen, onClose, onInviteSent, pres
       });
 
       if (response.ok) {
-        const data = await response.json();
+        const _data = await response.json();
         alert('Invitation sent successfully!');
         
         // Reset form

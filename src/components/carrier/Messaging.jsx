@@ -253,7 +253,7 @@ export default function Messaging({ initialThreadId = null } = {}) {
         };
         try {
           await attempt();
-        } catch (e1) {
+        } catch (_e1) {
           // One retry for transient timeouts.
           await new Promise(r => setTimeout(r, 800));
           await attempt();

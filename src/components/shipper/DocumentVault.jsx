@@ -152,7 +152,7 @@ export default function DocumentVault() {
       } else {
         setUploadError(result.detail || 'Failed to upload document');
       }
-    } catch (error) {
+    } catch (_error) {
       setUploadError('Failed to upload document. Please try again.');
     } finally {
       setUploading(false);

@@ -44,7 +44,7 @@ export default function AlertsNotifications({
           </div>
 
           <div className="dd-notifications-body">
-            {Boolean(loading) ? (
+            {loading ? (
               <div style={{ padding: 14, color: isDarkMode ? '#94a3b8' : '#64748b', fontSize: 13 }}>{tr('common.loading', 'Loading…')}</div>
             ) : list.length === 0 ? (
               <div style={{ padding: 14, color: isDarkMode ? '#94a3b8' : '#64748b', fontSize: 13 }}>{tr('alerts.noNotifications', 'No notifications yet.')}</div>

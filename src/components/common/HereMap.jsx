@@ -29,7 +29,7 @@ export default function HereMap({
   height = '400px',
   width = '100%'
 }) {
-  const mapRef = useRef(null);
+  const _mapRef = useRef(null);
   const containerRef = useRef(null);
   const [mapInstance, setMapInstance] = useState(null);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -162,16 +162,16 @@ export default function HereMap({
         );
 
         // Add map behavior
-        const behavior = new window.H.mapevents.Behavior(
+        const _behavior = new window.H.mapevents.Behavior(
           new window.H.mapevents.MapEvents(map)
         );
 
         // Add UI
-        const ui = window.H.ui.UI.createDefault(map, defaultLayers);
+        const _ui = window.H.ui.UI.createDefault(map, defaultLayers);
 
         // Add markers
         if (markers && markers.length > 0) {
-          markers.forEach((marker, index) => {
+          markers.forEach((marker, _index) => {
             const icon = new window.H.map.Icon(
               marker.icon || 'https://cdn-icons-png.flaticon.com/512/684/684908.png',
               { size: { w: 32, h: 32 } }
@@ -204,7 +204,7 @@ export default function HereMap({
                 position: { lat: m.lat, lng: m.lng },
                 zoom: Number.isFinite(Number(singleMarkerZoom)) ? Number(singleMarkerZoom) : zoom,
               });
-            } catch (e) {
+            } catch (_e) {
               // ignore
             }
           }
@@ -331,7 +331,7 @@ export default function HereMap({
           position: { lat: m.lat, lng: m.lng },
           zoom: Number.isFinite(Number(singleMarkerZoom)) ? Number(singleMarkerZoom) : zoom,
         });
-      } catch (e) {
+      } catch (_e) {
         // ignore
       }
     }

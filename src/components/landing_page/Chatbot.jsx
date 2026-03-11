@@ -6,7 +6,6 @@ import chatbotIcon from '../../assets/chatbot.svg';
 import cameraIcon from '../../assets/Camera.svg';
 import uploadIcon from '../../assets/Upload.svg';
 import smileIcon from '../../assets/face-smile.svg';
-import dotsIcon from '../../assets/dots-horizontal.svg';
 import '../../styles/landing_page/chatbot.css';
 
 // Simple Session ID Generator
@@ -28,7 +27,7 @@ export default function Chatbot({ isOpen, onClose, onMinimizeChange }) {
   const [complianceScore, setComplianceScore] = useState(null);
 
   // State for UI
-  const [currentTime, setCurrentTime] = useState('');
+  const [_currentTime, setCurrentTime] = useState('');
   const [isMinimized, setIsMinimized] = useState(false);
   const messagesEndRef = useRef(null);
 

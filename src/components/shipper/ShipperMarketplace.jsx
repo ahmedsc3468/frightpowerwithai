@@ -43,7 +43,7 @@ export default function ShipperMarketplace() {
   const ratings = ['All Ratings', '4.5+ Stars', '4.0+ Stars', '3.5+ Stars'];
 
   const [activeTab, setActiveTab] = useState('All');
-  const [openDropdown, setOpenDropdown] = useState(null);
+  const [_openDropdown, setOpenDropdown] = useState(null);
   const [selectedRegion, setSelectedRegion] = useState(regions[0]);
   const [selectedEquipment, setSelectedEquipment] = useState(equipment[0]);
   const [selectedRating, setSelectedRating] = useState(ratings[0]);
@@ -53,7 +53,7 @@ export default function ShipperMarketplace() {
   const [showAddLoads, setShowAddLoads] = useState(false);
   const [shipperLoads, setShipperLoads] = useState([]);
   const [marketplaceLoads, setMarketplaceLoads] = useState([]);
-  const [loadsLoading, setLoadsLoading] = useState(false);
+  const [_loadsLoading, setLoadsLoading] = useState(false);
 
   // Offers modal state
   const [offersModalOpen, setOffersModalOpen] = useState(false);
@@ -1107,7 +1107,7 @@ export default function ShipperMarketplace() {
             <div key={index} className="table-row">
               <div className="listing-id">{load.load_id}</div>
               <div className="lane">
-                <div>{load.origin || 'N/A'} -> {load.destination || 'N/A'}</div>
+                <div>{`${load.origin || 'N/A'} -> ${load.destination || 'N/A'}`}</div>
                 {load.additional_routes && load.additional_routes.length > 0 && (
                   <div style={{
                     fontSize: '11px',
@@ -1859,7 +1859,7 @@ export default function ShipperMarketplace() {
 
             <div style={{ marginBottom: '25px', padding: '15px', background: '#f8fafc', borderRadius: '8px' }}>
               <div style={{ fontSize: '16px', fontWeight: '600', color: '#1e293b', marginBottom: '8px' }}>
-                {selectedLoadForOffers.origin || 'N/A'} -> {selectedLoadForOffers.destination || 'N/A'}
+                {`${selectedLoadForOffers.origin || 'N/A'} -> ${selectedLoadForOffers.destination || 'N/A'}`}
               </div>
               <div style={{ fontSize: '14px', color: '#64748b' }}>
                 Equipment: {selectedLoadForOffers.equipment_type || 'N/A'} | 

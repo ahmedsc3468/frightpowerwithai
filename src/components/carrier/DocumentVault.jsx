@@ -91,7 +91,7 @@ function RowActions({ doc, onRefresh }) {
     }
   };
 
-  const handleRefresh = () => {
+  const _handleRefresh = () => {
     if (onRefresh) onRefresh();
   };
 

@@ -7,7 +7,7 @@ import { AUTO_REFRESH_MS } from '../../constants/refresh';
 import { useGeolocation, sortServicesByDistance, calculateDistance } from '../../hooks/useGeolocation';
 import { t } from '../../i18n/translate';
 import { db } from '../../firebase';
-import { collection, doc, setDoc, deleteDoc, getDocs, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 
 const MARKETPLACE_THRESHOLD = 60;
 const ACCESS_CACHE_PREFIX = 'fp_driver_marketplace_access_v1:';
@@ -49,7 +49,7 @@ export default function Marketplace({ isPostHire, setIsPostHire, isAvailable, on
   const { currentUser } = useAuth();
   const { settings } = useUserSettings();
   const language = settings?.language || 'English';
-  const locale = language === 'Spanish' ? 'es-ES' : language === 'Arabic' ? 'ar' : 'en-US';
+  const _locale = language === 'Spanish' ? 'es-ES' : language === 'Arabic' ? 'ar' : 'en-US';
   const tr = (key, fallback) => t(language, key, fallback);
   const trServiceType = (type) => {
     const label = SERVICE_TYPE_LABELS[type];
@@ -544,7 +544,7 @@ export default function Marketplace({ isPostHire, setIsPostHire, isAvailable, on
     }
     
     // Clean phone number (remove spaces, dashes, parentheses)
-    phoneNumber = phoneNumber.replace(/[\s\-\(\)]/g, '');
+    phoneNumber = phoneNumber.replace(/[\s\-()]/g, '');
     
     // Try to open device dialer with tel: protocol
     try {
@@ -1638,7 +1638,7 @@ export default function Marketplace({ isPostHire, setIsPostHire, isAvailable, on
                         <i className="fa-solid fa-filter" style={{ marginRight: '6px' }}></i>
                         {tr('marketplace.banner.filtersAppliedPrefix', 'Filters applied: ') +
                           Object.entries(selectedFilters)
-                            .filter(([k, v]) => v)
+                            .filter(([_k, v]) => v)
                             .map(([k]) => trServiceType(k))
                             .join(', ')}
                       </span>

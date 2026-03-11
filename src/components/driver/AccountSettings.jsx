@@ -342,7 +342,7 @@ export default function AccountSettings({ onProfileUpdate, onNavigate }) {
     try {
       setSaving(true);
       setMessage({ type: '', text: '' });
-      const token = await currentUser.getIdToken();
+      const _token = await currentUser.getIdToken();
       
       const updateData = {
         phone: profileData.phone,
@@ -816,7 +816,7 @@ export default function AccountSettings({ onProfileUpdate, onNavigate }) {
     const safe = (v) => {
       const s = v === null || v === undefined ? '' : String(v);
       const escaped = s.replace(/"/g, '""');
-      return /[\n,\"]/g.test(escaped) ? `"${escaped}"` : escaped;
+      return /[\n,"]/g.test(escaped) ? `"${escaped}"` : escaped;
     };
     if (!Array.isArray(rows) || rows.length === 0) return '';
     const cols = Array.from(rows.reduce((set, r) => {

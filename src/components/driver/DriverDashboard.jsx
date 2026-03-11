@@ -379,11 +379,11 @@ export default function DriverDashboard() {
   });
   
   // Load tracking state
-  const [loads, setLoads] = useState([]);
+  const [_loads, setLoads] = useState([]);
   const [activeLoad, setActiveLoad] = useState(null);
   const [assignedLoads, setAssignedLoads] = useState([]);
   const [completedLoads, setCompletedLoads] = useState([]);
-  const [loadsLoading, setLoadsLoading] = useState(false);
+  const [_loadsLoading, setLoadsLoading] = useState(false);
   const [tripStarted, setTripStarted] = useState(false);
   const [pickupCompleted, setPickupCompleted] = useState(false);
   const [deliveryCompleted, setDeliveryCompleted] = useState(false);
@@ -866,14 +866,14 @@ export default function DriverDashboard() {
     if (isSidebarOpen) setIsSidebarOpen(false);
   };
 
-  const openMessaging = (threadId = null) => {
+  const _openMessaging = (threadId = null) => {
     setNotifOpen(false);
     if (threadId) setInitialThreadId(threadId);
     setActiveNav('messaging');
     if (isSidebarOpen) setIsSidebarOpen(false);
   };
 
-  const fmtMsgWhen = (ts) => {
+  const _fmtMsgWhen = (ts) => {
     const n = Number(ts || 0);
     if (!n) return '';
     const d = new Date(n * 1000);

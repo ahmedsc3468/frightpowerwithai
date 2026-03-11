@@ -39,7 +39,7 @@ export default function SuperAdminDashboard(){
 
   const [activeNav, setActiveNav] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isSidebarDark, setIsSidebarDark] = useState(false);
+  const [isSidebarDark, _setIsSidebarDark] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState('');
   const [notifUnread, setNotifUnread] = useState(0);
@@ -109,7 +109,7 @@ export default function SuperAdminDashboard(){
     }
   };
 
-  const handleNotifToggle = async () => {
+  const _handleNotifToggle = async () => {
     const next = !notifOpen;
     setNotifOpen(next);
     if (next) {

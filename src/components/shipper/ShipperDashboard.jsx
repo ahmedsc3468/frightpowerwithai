@@ -37,7 +37,7 @@ export default function ShipperDashboard() {
   const [initialThreadId, setInitialThreadId] = useState(null);
   const [initialInvoiceId, setInitialInvoiceId] = useState(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [isSidebarDark, setIsSidebarDark] = useState(false);
+  const [isSidebarDark, _setIsSidebarDark] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
 
   // Messaging unread badge
@@ -136,7 +136,7 @@ export default function ShipperDashboard() {
     }
   };
 
-  const handleNotifToggle = async () => {
+  const _handleNotifToggle = async () => {
     const next = !notifOpen;
     setNotifOpen(next);
     if (next) {
@@ -569,7 +569,7 @@ export default function ShipperDashboard() {
   };
 
   // --- FILTER DROPDOWNS STATE ---
-  const [openDropdown, setOpenDropdown] = useState(null);
+  const [_openDropdown, setOpenDropdown] = useState(null);
   const [selectedRange, setSelectedRange] = useState('Last 30 Days');
   const [selectedRegion, setSelectedRegion] = useState('All Regions');
   const [selectedCarrier, setSelectedCarrier] = useState('All Carriers');

@@ -35,7 +35,7 @@ function writeAccessCache(uid, data) {
   }
 }
 
-export default function Marketplace({ activeSection, setActiveSection }) {
+export default function Marketplace({ activeSection, setActiveSection: _setActiveSection }) {
   const { currentUser } = useAuth()
   const cachedAccess = readAccessCache(currentUser?.uid)
   const [activeTab, setActiveTab] = useState(activeSection || 'loads') // loads | drivers | services
@@ -60,7 +60,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
 
   // Real-time marketplace loads from shippers
   const [loads, setLoads] = useState([])
-  const [loadsLoading, setLoadsLoading] = useState(false)
+  const [_loadsLoading, setLoadsLoading] = useState(false)
 
   // Drivers state
   const [drivers, setDrivers] = useState([])
@@ -496,7 +496,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
       })
 
       if (response.ok) {
-        const data = await response.json()
+        const _data = await response.json()
         alert('Bid submitted successfully!')
         setBidModalOpen(false)
         // Refresh loads to show new bid status

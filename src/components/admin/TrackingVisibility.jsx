@@ -60,7 +60,7 @@ export default function TrackingVisibility() {
       try {
         const data = await getJson('/admin/tracking/metrics', { timeoutMs: 20000 });
         if (!cancelled) setTrackingMetrics(data);
-      } catch (e) {
+      } catch (_e) {
         if (!cancelled) setTrackingMetrics(null);
       } finally {
         if (!cancelled) setMetricsLoading(false);
@@ -84,7 +84,7 @@ export default function TrackingVisibility() {
         const qs = new URLSearchParams({ role: roleFilter, limit: '2000' }).toString();
         const data = await getJson(`/admin/tracking/locations?${qs}`, { timeoutMs: 25000 });
         if (!cancelled) setLocations(Array.isArray(data?.items) ? data.items : []);
-      } catch (e) {
+      } catch (_e) {
         if (!cancelled) setLocations([]);
       } finally {
         if (!cancelled) setLocationsLoading(false);

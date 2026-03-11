@@ -197,8 +197,8 @@ export function UserSettingsProvider({ children }) {
         const normalized = normalizeSettings(remote);
         if (cancelled) return;
         setSettings(normalized);
-        try { localStorage.setItem(key, JSON.stringify(normalized)); } catch {}
-      } catch (e) {
+        try { localStorage.setItem(key, JSON.stringify(normalized)); } catch { /* ignore localStorage errors */ }
+      } catch (_e) {
         // Best-effort: keep cached/default.
         if (!cancelled) {
           // still mark loaded so UI can proceed
@@ -223,7 +223,7 @@ export function UserSettingsProvider({ children }) {
       const remote = await getJson('/auth/settings', { requestLabel: 'GET /auth/settings' });
       const normalized = normalizeSettings(remote);
       setSettings(normalized);
-      try { localStorage.setItem(storageKey(uid), JSON.stringify(normalized)); } catch {}
+      try { localStorage.setItem(storageKey(uid), JSON.stringify(normalized)); } catch { /* ignore localStorage errors */ }
       return normalized;
     } finally {
       if (isMountedRef.current) setLoading(false);
@@ -238,7 +238,7 @@ export function UserSettingsProvider({ children }) {
     });
     const normalized = normalizeSettings(updated);
     setSettings(normalized);
-    try { localStorage.setItem(storageKey(uid), JSON.stringify(normalized)); } catch {}
+    try { localStorage.setItem(storageKey(uid), JSON.stringify(normalized)); } catch { /* ignore localStorage errors */ }
     return normalized;
   }, [uid]);
 
@@ -247,7 +247,7 @@ export function UserSettingsProvider({ children }) {
       const resolved = (typeof next === 'function') ? next(prev) : next;
       const normalized = normalizeSettings(resolved);
       if (uid) {
-        try { localStorage.setItem(storageKey(uid), JSON.stringify(normalized)); } catch {}
+        try { localStorage.setItem(storageKey(uid), JSON.stringify(normalized)); } catch { /* ignore localStorage errors */ }
       }
       return normalized;
     });
@@ -268,6 +268,7 @@ export function UserSettingsProvider({ children }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useUserSettings() {
   const ctx = useContext(UserSettingsContext);
   if (!ctx) {

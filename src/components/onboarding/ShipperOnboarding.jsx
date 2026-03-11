@@ -15,7 +15,7 @@ export default function ShipperOnboarding(){
   const navigate = useNavigate()
   const { currentUser } = useAuth()
   const images = [carrier_ob_1, carrier_ob_2, carrier_ob_3]
-  const [currentImg, setCurrentImg] = useState(0)
+  const [_currentImg, setCurrentImg] = useState(0)
   const [isChatOpen, setIsChatOpen] = useState(false)
   const [currentStep, setCurrentStep] = useState(1)
   const [saving, setSaving] = useState(false)
@@ -470,7 +470,7 @@ function ShipperFinalReview({ shipperData, preferences, uploads, setCurrentStep 
   }
   const prefs = preferences || { freightType: 'Dry Van', preferredEquipment: '', avgMonthlyVolume: '', regionsOfOperation: '' }
   const ups = uploads || { w9: null, proofOfRegistration: null, bmc: null, coi: null }
-  const setStep = setCurrentStep || (()=>{})
+  const _setStep = setCurrentStep || (()=>{})
 
   return (
     <div style={{border:'1px solid #eef2f7',borderRadius:8,padding:16,display:'flex',flexDirection:'column',gap:12}}>

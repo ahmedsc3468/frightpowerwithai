@@ -156,7 +156,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
     setFormData(prev => ({ ...prev, visibility: option }));
   };
 
-  const toggleRequirement = (req) => {
+  const _toggleRequirement = (req) => {
     setFormData(prev => ({
       ...prev,
       specialRequirements: prev.specialRequirements.includes(req)
@@ -575,7 +575,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
     handleStep3Next(); // Just move to confirmation
   };
 
-  const handleFinalPostLoad = () => {
+  const _handleFinalPostLoad = () => {
     // Removed - using handlePostLoad now
   };
 
@@ -638,7 +638,6 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                                      formData.equipmentType === 'Reefer' ? 'reefer' :
                                      formData.equipmentType === 'Flatbed' ? 'flatbed' : 'dryVan'}
                           onRouteCalculated={(data) => {
-                            setRouteData(data);
                             setEstimatedDistance(data.distance_miles);
                             setEstimatedTransitTime(data.duration_hours);
                           }}

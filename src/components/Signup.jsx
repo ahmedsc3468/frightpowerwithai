@@ -36,7 +36,7 @@ export default function Signup(){
       if(loc.state.role) setRole(loc.state.role)
       // If Chatbot sent data
       if (loc.state.prefill) {
-         const { company, cdl, score } = loc.state.prefill;
+         const { company, cdl: _cdl, score } = loc.state.prefill;
          if (company) setName(company);
          // You can store score/cdl in localStorage or handle it after verification
          if (score) console.log("User has pre-verified score:", score);

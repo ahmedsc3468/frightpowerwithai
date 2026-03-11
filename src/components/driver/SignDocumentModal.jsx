@@ -34,30 +34,13 @@ export default function SignDocumentModal({ documentItem, onClose, onSigned, mod
     return ()=>{ document.body.classList.remove('fpdd-modal-open'); window.removeEventListener('keydown', onKey) }
   }, [onClose])
 
-  if(!documentItem) return null
-
-  const canSign = Boolean(documentItem?.key) && Boolean(documentItem?.version) && documentItem?.status !== 'Signed'
-
-  const isViewOnly = mode === 'view'
-  const titleText = documentItem.title || tr('signDocumentModal.defaults.documentTitle', 'Consent Document')
-
-  const SIGN_METHOD_LABELS = {
-    typed: { key: 'signDocumentModal.signMethod.typed', fallback: 'Type name (auto-filled)' },
-    image: { key: 'signDocumentModal.signMethod.image', fallback: 'Signature image (stored)' },
-  }
-
-  const methodLabel = (value) => {
-    const config = SIGN_METHOD_LABELS[value]
-    return config ? tr(config.key, config.fallback) : String(value || '')
-  }
+  const iframeRef = useRef(null)
 
   const iframeSrcDoc = useMemo(() => {
     // Always render server-generated template HTML (isolated in iframe).
     const loadingText = tr('signDocumentModal.preview.loadingHtml', 'Loading…')
     return templateHtml || `<html><body style="font-family: Arial, sans-serif; padding: 16px;">${loadingText}</body></html>`
   }, [templateHtml, language])
-
-  const iframeRef = useRef(null)
 
   const apiFetch = async (path, init = {}) => {
     if (!currentUser) throw new Error(tr('signDocumentModal.errors.notSignedIn', 'Not signed in'))
@@ -152,6 +135,23 @@ export default function SignDocumentModal({ documentItem, onClose, onSigned, mod
       }
     }
   }, [signaturePreviewUrl])
+
+  if(!documentItem) return null
+
+  const canSign = Boolean(documentItem?.key) && Boolean(documentItem?.version) && documentItem?.status !== 'Signed'
+
+  const isViewOnly = mode === 'view'
+  const titleText = documentItem.title || tr('signDocumentModal.defaults.documentTitle', 'Consent Document')
+
+  const SIGN_METHOD_LABELS = {
+    typed: { key: 'signDocumentModal.signMethod.typed', fallback: 'Type name (auto-filled)' },
+    image: { key: 'signDocumentModal.signMethod.image', fallback: 'Signature image (stored)' },
+  }
+
+  const methodLabel = (value) => {
+    const config = SIGN_METHOD_LABELS[value]
+    return config ? tr(config.key, config.fallback) : String(value || '')
+  }
 
   const handleUploadSignature = async (file) => {
     if (!file) return

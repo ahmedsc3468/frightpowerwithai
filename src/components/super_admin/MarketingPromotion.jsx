@@ -5,7 +5,7 @@ import { downloadCsv } from '../../utils/fileDownload';
 
 export default function MarketingPromotion(){
 
-  const rows = [
+  const _rows = [
     { title: 'Verify carrier documents', module: 'Compliance', assigned: 'Lisa', priority: 'High', due: 'Oct 14', status: 'In Progress' },
     { title: 'Send broker reminder', module: 'Messages', assigned: 'Ahmed', priority: 'Medium', due: 'Oct 13', status: 'Overdue' },
     { title: 'Update campaign copy', module: 'Marketing', assigned: 'Farhia', priority: 'Low', due: 'Oct 18', status: 'Done' },

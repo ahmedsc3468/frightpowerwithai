@@ -67,7 +67,7 @@ export default function AdminSignup(){
       }
 
       // Ensure no active session for pending admins
-      try { await signOut(auth) } catch {}
+      try { await signOut(auth) } catch { /* ignore sign-out errors during signup */ }
 
       navigate('/admin/login', { state: { pendingApproval: true } })
     } catch (err) {

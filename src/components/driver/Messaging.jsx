@@ -298,14 +298,14 @@ export default function Messaging({ initialThreadId = null } = {}) {
     let cancelled = false;
     (async () => {
       try {
-        let showedCached = false;
+        let _showedCached = false;
         setError('');
         // Instant UI: try cached threads first.
         try {
           const cached = JSON.parse(localStorage.getItem('messaging:driver:threads') || 'null');
           if (cached?.threads?.length) {
             setThreads(cached.threads);
-            showedCached = true;
+            _showedCached = true;
             setLoading(false);
           } else {
             setLoading(true);

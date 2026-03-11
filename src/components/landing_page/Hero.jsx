@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import heroBg from '../../assets/hero_bg.png';
 import macbookMockup from '../../assets/macbook_mockup.svg';
-import aiIcon from '../../assets/ai.png';
 import Header from './Header';
 import Chatbot from './Chatbot';
 import '../../styles/landing_page/hero.css';
@@ -9,7 +8,7 @@ import '../../styles/landing_page/hero.css';
 export default function Hero() {
   const [isChatbotOpen, setIsChatbotOpen] = useState(false);
 
-  const toggleChatbot = () => {
+  const _toggleChatbot = () => {
     setIsChatbotOpen(!isChatbotOpen);
   };
   return (

@@ -620,7 +620,7 @@ const FactoringInvoicing = () => {
 
   const _csvEscape = (value) => {
     const s = String(value ?? '');
-    if (/[\n\r,\"]/g.test(s)) return `"${s.replace(/\"/g, '""')}"`;
+    if (/[\n\r,"]/g.test(s)) return `"${s.replace(/"/g, '""')}"`;
     return s;
   };
 
