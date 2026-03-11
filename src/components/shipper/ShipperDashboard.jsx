@@ -21,6 +21,8 @@ import InviteCarrierModal from './InviteCarrierModal';
 import CarrierBids from './CarrierBids';
 import ShipperMyLoads from './MyLoads';
 import Bills from './Bills';
+import AlertsNotifications from '../carrier/AlertsNotifications';
+import ShipperProfile from './ShipperProfile';
 import '../../styles/shipper/InviteCarrierModal.css';
 // OnboardingCoach removed - compliance data now shown in Compliance & Safety page
 import logo from '/src/assets/logo.png';
@@ -185,6 +187,10 @@ export default function ShipperDashboard() {
   const [homeLoadsLoading, setHomeLoadsLoading] = useState(false);
   const [homeLoadsError, setHomeLoadsError] = useState('');
   const [homeLoads, setHomeLoads] = useState([]);
+  const [homeCarriersLoading, setHomeCarriersLoading] = useState(false);
+  const [homeCarriers, setHomeCarriers] = useState([]);
+  const [homeComplianceLoading, setHomeComplianceLoading] = useState(false);
+  const [homeCompliance, setHomeCompliance] = useState(null);
 
   // AddLoads modal state
   const [showAddLoads, setShowAddLoads] = useState(false);
@@ -299,6 +305,56 @@ export default function ShipperDashboard() {
     }
   };
 
+  const fetchHomeCarriers = async () => {
+    if (!currentUser) return;
+    setHomeCarriersLoading(true);
+    try {
+      const token = await currentUser.getIdToken();
+      const res = await fetch(`${API_URL}/carriers/my-carriers`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      if (!res.ok) {
+        setHomeCarriers([]);
+        return;
+      }
+      const data = await res.json();
+      setHomeCarriers(Array.isArray(data?.carriers) ? data.carriers : []);
+    } catch (error) {
+      console.error('Error fetching carriers for dashboard:', error);
+      setHomeCarriers([]);
+    } finally {
+      setHomeCarriersLoading(false);
+    }
+  };
+
+  const fetchHomeCompliance = async () => {
+    if (!currentUser) return;
+    setHomeComplianceLoading(true);
+    try {
+      const token = await currentUser.getIdToken();
+      const res = await fetch(`${API_URL}/compliance/status`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      if (!res.ok) {
+        setHomeCompliance(null);
+        return;
+      }
+      const data = await res.json();
+      setHomeCompliance(data || null);
+    } catch (error) {
+      console.error('Error fetching compliance summary for dashboard:', error);
+      setHomeCompliance(null);
+    } finally {
+      setHomeComplianceLoading(false);
+    }
+  };
+
   // Handle editing draft loads
   const handleEditDraft = (draftLoad) => {
     setEditingDraftLoad(draftLoad);
@@ -386,6 +442,12 @@ export default function ShipperDashboard() {
   // Fetch a small set of loads used by the Home placeholders.
   useEffect(() => {
     fetchHomeLoads();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser]);
+
+  useEffect(() => {
+    fetchHomeCarriers();
+    fetchHomeCompliance();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
 
@@ -529,10 +591,12 @@ export default function ShipperDashboard() {
   function HomeView() {
     const normalizeStatus = (s) => String(s || '').trim().toLowerCase();
     const activeStatuses = new Set(['posted', 'tendered', 'covered', 'accepted', 'awarded', 'dispatched', 'in_transit']);
+    const assignedStatuses = new Set(['covered', 'accepted', 'awarded', 'dispatched', 'in_transit', 'delivered', 'completed']);
     const deliveredStatuses = new Set(['delivered', 'completed']);
 
     const activeLoads = (homeLoads || []).filter((l) => activeStatuses.has(normalizeStatus(l?.status || l?.load_status)));
     const deliveredLoads = (homeLoads || []).filter((l) => deliveredStatuses.has(normalizeStatus(l?.status || l?.load_status)));
+    const assignedLoads = (homeLoads || []).filter((l) => assignedStatuses.has(normalizeStatus(l?.status || l?.load_status)));
 
     const totalCount = Number(dashboardStats?.total_loads || 0) || (homeLoads || []).length;
     const activeCount = Number(dashboardStats?.active_loads || 0) || activeLoads.length;
@@ -576,6 +640,79 @@ export default function ShipperDashboard() {
       if (delivery) return `ETA: ${delivery}`;
       return 'ETA: TBD';
     };
+
+    const carrierMetricsMap = new Map();
+    (homeCarriers || []).forEach((carrier) => {
+      const carrierId = String(carrier?.carrier_id || carrier?.id || '').trim();
+      const carrierName = String(carrier?.carrier_name || carrier?.name || carrier?.company_name || '').trim();
+      const key = carrierId || carrierName;
+      if (!key) return;
+      carrierMetricsMap.set(key, {
+        key,
+        id: carrierId,
+        name: carrierName || 'Carrier',
+        rating: Number(carrier?.rating || 0),
+        totalLoads: Number(carrier?.total_loads || 0),
+        activeRelationship: String(carrier?.status || '').trim().toLowerCase() === 'active',
+        assignedLoads: 0,
+        activeLoads: 0,
+        completedLoads: 0,
+      });
+    });
+
+    (homeLoads || []).forEach((load) => {
+      const status = normalizeStatus(load?.status || load?.load_status);
+      const carrierId = String(load?.assigned_carrier || load?.assigned_carrier_id || load?.carrier_id || '').trim();
+      const carrierName = String(load?.assigned_carrier_name || load?.carrier_name || '').trim();
+      const key = carrierId || carrierName;
+      if (!key) return;
+      const current = carrierMetricsMap.get(key) || {
+        key,
+        id: carrierId,
+        name: carrierName || 'Carrier',
+        rating: 0,
+        totalLoads: 0,
+        activeRelationship: false,
+        assignedLoads: 0,
+        activeLoads: 0,
+        completedLoads: 0,
+      };
+
+      current.id = current.id || carrierId;
+      current.name = current.name || carrierName || 'Carrier';
+      current.assignedLoads += 1;
+      if (activeStatuses.has(status)) current.activeLoads += 1;
+      if (deliveredStatuses.has(status)) current.completedLoads += 1;
+
+      carrierMetricsMap.set(key, current);
+    });
+
+    const topCarrierRows = Array.from(carrierMetricsMap.values())
+      .filter((carrier) => carrier.name)
+      .sort((left, right) => {
+        if (right.completedLoads !== left.completedLoads) return right.completedLoads - left.completedLoads;
+        if (right.activeLoads !== left.activeLoads) return right.activeLoads - left.activeLoads;
+        if (right.assignedLoads !== left.assignedLoads) return right.assignedLoads - left.assignedLoads;
+        if (right.totalLoads !== left.totalLoads) return right.totalLoads - left.totalLoads;
+        return right.rating - left.rating;
+      })
+      .slice(0, 3);
+
+    const coverageRate = totalCount > 0 ? Math.round((assignedLoads.length / totalCount) * 100) : 0;
+    const completionRate = totalCount > 0 ? Math.round((deliveredLoads.length / totalCount) * 100) : 0;
+    const activeCarrierCount = (homeCarriers || []).filter((carrier) => String(carrier?.status || '').trim().toLowerCase() === 'active').length;
+    const averageCarrierRating = (homeCarriers || []).length > 0
+      ? ((homeCarriers || []).reduce((sum, carrier) => sum + Number(carrier?.rating || 0), 0) / (homeCarriers || []).length).toFixed(1)
+      : '0.0';
+
+    const complianceDocuments = Array.isArray(homeCompliance?.documents) ? homeCompliance.documents : [];
+    const expiringComplianceItems = complianceDocuments
+      .filter((doc) => ['Expired', 'Expiring Soon'].includes(String(doc?.status || '').trim()))
+      .slice(0, 2);
+    const complianceWarnings = Array.isArray(homeCompliance?.warnings) ? homeCompliance.warnings.filter(Boolean) : [];
+    const complianceRecommendations = Array.isArray(homeCompliance?.recommendations) ? homeCompliance.recommendations.filter(Boolean) : [];
+    const complianceScore = Number(homeCompliance?.compliance_score || 0);
+    const complianceTone = complianceScore >= 80 ? 'Fully compliant' : complianceScore >= 50 ? 'Needs attention' : 'At risk';
 
     return (
       <>
@@ -803,36 +940,32 @@ export default function ShipperDashboard() {
           <div className="card top-carriers">
             <h3>Top Carriers</h3>
             <ol className="top-carriers">
-              <li>
-                <div className="carrier-left">
-                  <div className="name">Swift Transport</div>
-                  <div className="sub muted small">98.5% On-Time</div>
-                </div>
-                <div className="carrier-right">
-                  <span className="rating">4.9★</span>
-                  <div className="muted small">42 loads</div>
-                </div>
-              </li>
-              <li>
-                <div className="carrier-left">
-                  <div className="name">Reliable Freight</div>
-                  <div className="sub muted small">96.8% On-Time</div>
-                </div>
-                <div className="carrier-right">
-                  <span className="rating blue">4.8★</span>
-                  <div className="muted small">38 loads</div>
-                </div>
-              </li>
-              <li>
-                <div className="carrier-left">
-                  <div className="name">Express Logistics</div>
-                  <div className="sub muted small">95.2% On-Time</div>
-                </div>
-                <div className="carrier-right">
-                  <span className="rating orange">4.7★</span>
-                  <div className="muted small">29 loads</div>
-                </div>
-              </li>
+              {homeCarriersLoading ? (
+                <li>
+                  <div className="muted small">Loading carriers...</div>
+                </li>
+              ) : topCarrierRows.length === 0 ? (
+                <li>
+                  <div className="muted small">No carrier activity yet.</div>
+                </li>
+              ) : topCarrierRows.map((carrier, index) => (
+                <li key={carrier.key || `${carrier.name}-${index}`}>
+                  <div className="carrier-left">
+                    <div className="name">{carrier.name}</div>
+                    <div className="sub muted small">
+                      {carrier.completedLoads > 0 || carrier.activeLoads > 0
+                        ? `${carrier.completedLoads} completed • ${carrier.activeLoads} active`
+                        : `${carrier.activeRelationship ? 'Active relationship' : 'Connected'} • ${carrier.assignedLoads || carrier.totalLoads || 0} loads`}
+                    </div>
+                  </div>
+                  <div className="carrier-right">
+                    <span className={`rating ${index === 1 ? 'blue' : index === 2 ? 'orange' : ''}`}>
+                      {carrier.rating > 0 ? `${carrier.rating.toFixed(1)}★` : 'No rating'}
+                    </span>
+                    <div className="muted small">{carrier.assignedLoads || carrier.totalLoads || 0} loads</div>
+                  </div>
+                </li>
+              ))}
             </ol>
           </div>
 
@@ -840,26 +973,50 @@ export default function ShipperDashboard() {
             <h3>Performance Health</h3>
             <div className="performance-metrics">
               <div className="metric">
-                <strong className="green">Financial</strong>
-                <div className="muted">92%</div>
+                <strong className="green">Coverage</strong>
+                <div className="muted">{coverageRate}%</div>
               </div>
               <div className="metric">
-                <strong className="blue">Operational</strong>
-                <div className="muted">96%</div>
+                <strong className="blue">Completion</strong>
+                <div className="muted">{completionRate}%</div>
               </div>
+            </div>
+            <div className="muted small" style={{ marginTop: 12 }}>
+              {totalCount} total loads • {activeCarrierCount} active carriers • Avg rating {averageCarrierRating}★
             </div>
           </div>
 
           <div className="card compliance-card">
             <h3>Compliance Status</h3>
-            <div className="sd-exp-item pill">
-              <div className="exp-title">Insurance Expiring</div>
-              <div className="exp-sub muted">Swift Transport - 3 days</div>
-            </div>
-            <div className="sd-exp-item pill">
-              <div className="exp-title">DOT Audit Due</div>
-              <div className="exp-sub muted">Reliable Freight - 7 days</div>
-            </div>
+            {homeComplianceLoading ? (
+              <div className="sd-exp-item pill">
+                <div className="exp-title">Loading compliance...</div>
+              </div>
+            ) : (
+              <>
+                <div className="sd-exp-item pill">
+                  <div className="exp-title">Compliance score: {complianceScore}%</div>
+                  <div className="exp-sub muted">{complianceTone} • {complianceDocuments.length} documents on file</div>
+                </div>
+                {expiringComplianceItems.length > 0 ? expiringComplianceItems.map((doc, index) => (
+                  <div className="sd-exp-item pill" key={`compliance-doc-${doc?.id || index}`}>
+                    <div className="exp-title">{String(doc?.document_type || 'Document')} {String(doc?.status || '').trim()}</div>
+                    <div className="exp-sub muted">{doc?.expiry_date ? `Expiry: ${doc.expiry_date}` : 'Review required'}</div>
+                  </div>
+                )) : complianceWarnings.slice(0, 1).map((warning, index) => (
+                  <div className="sd-exp-item pill" key={`compliance-warning-${index}`}>
+                    <div className="exp-title">Compliance alert</div>
+                    <div className="exp-sub muted">{warning}</div>
+                  </div>
+                ))}
+                {expiringComplianceItems.length === 0 && complianceWarnings.length === 0 && complianceRecommendations.slice(0, 1).map((recommendation, index) => (
+                  <div className="sd-exp-item pill" key={`compliance-recommendation-${index}`}>
+                    <div className="exp-title">Next action</div>
+                    <div className="exp-sub muted">{recommendation}</div>
+                  </div>
+                ))}
+              </>
+            )}
           </div>
         </section>
       </>
@@ -872,76 +1029,7 @@ export default function ShipperDashboard() {
     if (activeNav === 'my-carriers') return <MyCarriers />;
     if (activeNav === 'marketplace') return <ShipperMarketplace />;
     if (activeNav === 'carrier-bids') return <CarrierBids />;
-    if (activeNav === 'alerts') return (
-      <div>
-        <header className="fp-header">
-          <div className="fp-header-titles">
-            <h2>Alerts &amp; Notifications</h2>
-            <p className="fp-subtitle">Updates, reminders, and important alerts.</p>
-          </div>
-          <div className="fp-header-controls">
-            <button
-              type="button"
-              className="btn small ghost-cd"
-              onClick={() => fetchNotifications()}
-              disabled={Boolean(notifLoading)}
-            >
-              {notifLoading ? 'Loading…' : 'Refresh'}
-            </button>
-          </div>
-        </header>
-        <section className="fp-grid">
-          <div className="card">
-            <div className="card-header"><h3>Notifications</h3></div>
-            <div style={{ maxHeight: 560, overflowY: 'auto', padding: 14 }}>
-              {Boolean(notifLoading) ? (
-                <div className="muted">Loading…</div>
-              ) : (notifItems || []).length === 0 ? (
-                <div className="muted">No notifications yet.</div>
-              ) : (
-                <div className="expiring-list">
-                  {(notifItems || []).map((n) => {
-                    const isRead = Boolean(n?.is_read);
-                    const title = String(n?.title || 'Notification');
-                    const msg = String(n?.message || '');
-                    const when = String(n?.relative_time || n?.formatted_time || n?.created_at_human || n?.created_at || '').trim();
-                    return (
-                      <div
-                        key={String(n?.id || Math.random())}
-                        className="sd-exp-item pill"
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => handleNotifAction(n)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleNotifAction(n)}
-                        style={{ cursor: 'pointer', opacity: isRead ? 0.75 : 1 }}
-                      >
-                        <div className="exp-title" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
-                          <span>{title}</span>
-                          {!isRead ? (
-                            <button
-                              type="button"
-                              className="btn small ghost-cd"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                markNotificationRead(String(n?.id || '').trim());
-                              }}
-                            >
-                              Mark read
-                            </button>
-                          ) : null}
-                        </div>
-                        {msg ? <div className="exp-sub">{msg}</div> : null}
-                        {when ? <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>{when}</div> : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        </section>
-      </div>
-    );
+    if (activeNav === 'alerts') return <AlertsNotifications />;
     if (activeNav === 'tracking') return <TrackingVisibility initialLoadId={trackingInitialLoadId} />;
     if (activeNav === 'doc-vault') return <DocumentVault />;
     if (activeNav === 'finance') return <Finance />;
@@ -949,26 +1037,9 @@ export default function ShipperDashboard() {
     if (activeNav === 'compliance') return <ComplianceOverview />;
     if (activeNav === 'settings') return <Settings />;
     if (activeNav === 'help') return <AiHub />;
-    if (activeNav === 'analytics') return <ShipperAnalytics />;
+    if (activeNav === 'analytics') return <ShipperAnalytics onNavigate={setActiveNav} />;
     if (activeNav === 'messaging') return <Messaging initialThreadId={initialThreadId} />;
-    if (activeNav === 'profile') return (
-      <div>
-        <header className="fp-header">
-          <div className="fp-header-titles">
-            <h2>Profile</h2>
-            <p className="fp-subtitle">Complete your business profile and onboarding information.</p>
-          </div>
-        </header>
-        <section className="fp-grid">
-          <div className="card">
-            <div className="card-header"><h3>Profile Component</h3></div>
-            <div style={{ padding: 20 }}>
-              <p>Profile component will be added here. This is where users can complete their onboarding details.</p>
-            </div>
-          </div>
-        </section>
-      </div>
-    );
+    if (activeNav === 'profile') return <ShipperProfile />;
     return (
       <div>
         <header className="fp-header">
@@ -1124,8 +1195,28 @@ export default function ShipperDashboard() {
                   </div>
                 )}
               </div>
-              <i className="fa-solid fa-robot bot-icon" aria-hidden="true" />
-              <img src="https://randomuser.me/api/portraits/women/65.jpg" alt="avatar" className="avatar-img"/>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveNav('help');
+                  setIsSidebarOpen(false);
+                }}
+                aria-label="Open AI Hub"
+                style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
+              >
+                <i className="fa-solid fa-robot bot-icon" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveNav('profile');
+                  setIsSidebarOpen(false);
+                }}
+                aria-label="Open Profile"
+                style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
+              >
+                <img src="https://randomuser.me/api/portraits/women/65.jpg" alt="avatar" className="avatar-img"/>
+              </button>
             </div>
           </div>
         </div>

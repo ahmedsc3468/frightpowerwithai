@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { API_URL } from '../../config';
 
-export default function InviteCarrierModal({ isOpen, onClose, onInviteSent }) {
+export default function InviteCarrierModal({ isOpen, onClose, onInviteSent, preselectedCarrier = null }) {
   const { currentUser } = useAuth();
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
@@ -22,6 +22,15 @@ export default function InviteCarrierModal({ isOpen, onClose, onInviteSent }) {
       fetchCarriers();
     }
   }, [isOpen, inviteMode, currentUser]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!preselectedCarrier) return;
+    setInviteMode('marketplace');
+    setSelectedCarrier(preselectedCarrier);
+    const presetName = preselectedCarrier.name || preselectedCarrier.company_name || '';
+    setSearchQuery(presetName);
+  }, [isOpen, preselectedCarrier]);
 
   const fetchCarriers = async () => {
     setLoadingCarriers(true);
