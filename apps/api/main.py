@@ -7353,6 +7353,272 @@ async def hire_driver(
         raise HTTPException(status_code=500, detail="Failed to hire driver")
 
 
+class DriverHireRequestRespond(BaseModel):
+    accept: bool
+    notes: Optional[str] = None
+
+
+def _create_in_app_notification(
+    *,
+    user_id: str,
+    notification_type: str,
+    title: str,
+    message: str,
+    resource_type: Optional[str] = None,
+    resource_id: Optional[str] = None,
+    action_url: Optional[str] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    try:
+        notification_id = str(uuid.uuid4())
+        payload: Dict[str, Any] = {
+            "id": notification_id,
+            "user_id": str(user_id or "").strip(),
+            "notification_type": str(notification_type or "notification").strip(),
+            "title": str(title or "Notification").strip(),
+            "message": str(message or "").strip(),
+            "resource_type": str(resource_type or "system").strip(),
+            "resource_id": str(resource_id or "").strip(),
+            "action_url": str(action_url or "").strip(),
+            "is_read": False,
+            "created_at": int(time.time()),
+        }
+        if isinstance(extra, dict):
+            payload.update(extra)
+        db.collection("notifications").document(notification_id).set(payload)
+        return notification_id
+    except Exception as e:
+        print(f"Error creating in-app notification: {e}")
+        return None
+
+
+@app.post("/drivers/{driver_id}/hire-request")
+async def request_driver_hire(
+    driver_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Create a carrier -> driver hire request that the driver can accept or reject."""
+    try:
+        user_role = str(user.get("role") or "").lower()
+        if user_role != "carrier":
+            raise HTTPException(status_code=403, detail="Only carriers can request drivers")
+
+        carrier_id = str(user.get("uid") or "").strip()
+        if not carrier_id:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+        driver_ref = db.collection("drivers").document(driver_id)
+        driver_doc = driver_ref.get()
+        if not driver_doc.exists:
+            raise HTTPException(status_code=404, detail="Driver not found")
+
+        driver_data = driver_doc.to_dict() or {}
+        existing_carrier_id = str(driver_data.get("carrier_id") or "").strip()
+        if existing_carrier_id:
+            raise HTTPException(status_code=400, detail="Driver is already hired by a carrier")
+
+        pending_query = (
+            db.collection("driver_hire_requests")
+            .where("carrier_id", "==", carrier_id)
+            .where("driver_id", "==", driver_id)
+            .where("status", "==", "pending")
+            .stream()
+        )
+        for doc in pending_query:
+            req_data = doc.to_dict() or {}
+            return JSONResponse(content={
+                "success": True,
+                "message": "Hire request already pending",
+                "request": {
+                    "id": doc.id,
+                    **req_data,
+                },
+            })
+
+        carrier_name = str(
+            user.get("display_name")
+            or user.get("company_name")
+            or user.get("email")
+            or "Carrier"
+        ).strip()
+        carrier_email = str(user.get("email") or "").strip()
+
+        request_id = str(uuid.uuid4())
+        now_ts = int(time.time())
+        request_payload = {
+            "id": request_id,
+            "driver_id": driver_id,
+            "carrier_id": carrier_id,
+            "carrier_name": carrier_name,
+            "carrier_email": carrier_email,
+            "status": "pending",
+            "created_at": now_ts,
+            "updated_at": now_ts,
+        }
+        db.collection("driver_hire_requests").document(request_id).set(request_payload)
+
+        _create_in_app_notification(
+            user_id=driver_id,
+            notification_type="driver_hire_request",
+            title="New Carrier Hire Request",
+            message=f"{carrier_name} invited you to join their fleet. Review and respond in Hiring & Onboarding.",
+            resource_type="driver_hire_request",
+            resource_id=request_id,
+            action_url="/driver-dashboard?nav=hiring",
+            extra={
+                "carrier_id": carrier_id,
+                "carrier_name": carrier_name,
+                "hire_request_id": request_id,
+            },
+        )
+
+        log_action(carrier_id, "DRIVER_HIRE_REQUEST_SENT", f"Sent hire request {request_id} to driver {driver_id}")
+
+        return JSONResponse(content={
+            "success": True,
+            "message": "Hire request sent to driver",
+            "request": request_payload,
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error creating driver hire request: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Failed to create hire request")
+
+
+@app.get("/drivers/hire-requests")
+async def list_driver_hire_requests(
+    status: Optional[str] = "pending",
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """List hire requests for the current driver or carrier."""
+    try:
+        role = str(user.get("role") or "").lower()
+        uid = str(user.get("uid") or "").strip()
+        if not uid:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+        if role == "driver":
+            query = db.collection("driver_hire_requests").where("driver_id", "==", uid)
+        elif role == "carrier":
+            query = db.collection("driver_hire_requests").where("carrier_id", "==", uid)
+        else:
+            raise HTTPException(status_code=403, detail="Only drivers or carriers can view hire requests")
+
+        status_value = str(status or "").strip().lower()
+        if status_value and status_value != "all":
+            query = query.where("status", "==", status_value)
+
+        requests = []
+        for doc in query.stream():
+            payload = doc.to_dict() or {}
+            payload["id"] = payload.get("id") or doc.id
+            requests.append(payload)
+
+        requests.sort(key=lambda r: float(r.get("created_at") or 0), reverse=True)
+        return {"requests": requests, "total": len(requests)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error listing driver hire requests: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Failed to fetch hire requests")
+
+
+@app.post("/drivers/hire-requests/{request_id}/respond")
+async def respond_driver_hire_request(
+    request_id: str,
+    request: DriverHireRequestRespond,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Allow a driver to accept or reject a carrier hire request."""
+    try:
+        role = str(user.get("role") or "").lower()
+        if role != "driver":
+            raise HTTPException(status_code=403, detail="Only drivers can respond to hire requests")
+
+        driver_id = str(user.get("uid") or "").strip()
+        if not driver_id:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+        req_ref = db.collection("driver_hire_requests").document(request_id)
+        req_doc = req_ref.get()
+        if not req_doc.exists:
+            raise HTTPException(status_code=404, detail="Hire request not found")
+
+        req_data = req_doc.to_dict() or {}
+        if str(req_data.get("driver_id") or "").strip() != driver_id:
+            raise HTTPException(status_code=403, detail="This hire request is not for you")
+
+        current_status = str(req_data.get("status") or "").strip().lower()
+        if current_status != "pending":
+            raise HTTPException(status_code=400, detail="This hire request has already been processed")
+
+        carrier_id = str(req_data.get("carrier_id") or "").strip()
+        carrier_name = str(req_data.get("carrier_name") or "Carrier").strip() or "Carrier"
+        now_ts = int(time.time())
+
+        if request.accept:
+            driver_ref = db.collection("drivers").document(driver_id)
+            driver_doc = driver_ref.get()
+            existing_driver_data = driver_doc.to_dict() if driver_doc.exists else {}
+            existing_carrier_id = str((existing_driver_data or {}).get("carrier_id") or "").strip()
+            if existing_carrier_id and existing_carrier_id != carrier_id:
+                raise HTTPException(status_code=400, detail="You are already hired by another carrier")
+
+            driver_ref.set({
+                "carrier_id": carrier_id,
+                "hired_at": now_ts,
+                "updated_at": now_ts,
+            }, merge=True)
+
+        new_status = "accepted" if request.accept else "rejected"
+        req_ref.update({
+            "status": new_status,
+            "responded_at": now_ts,
+            "updated_at": now_ts,
+            "response_notes": str(request.notes or "").strip(),
+        })
+
+        decision_text = "accepted" if request.accept else "declined"
+        _create_in_app_notification(
+            user_id=carrier_id,
+            notification_type="driver_hire_request_response",
+            title="Driver Responded to Hire Request",
+            message=f"Driver {driver_id} {decision_text} your hire request{f' from {carrier_name}' if carrier_name else ''}.",
+            resource_type="driver_hire_request",
+            resource_id=request_id,
+            action_url="/carrier-dashboard?nav=drivers",
+            extra={
+                "driver_id": driver_id,
+                "carrier_id": carrier_id,
+                "hire_request_id": request_id,
+                "response": new_status,
+            },
+        )
+
+        log_action(driver_id, "DRIVER_HIRE_REQUEST_RESPONDED", f"Driver {driver_id} {new_status} hire request {request_id}")
+
+        return JSONResponse(content={
+            "success": True,
+            "message": f"Hire request {new_status}",
+            "request_id": request_id,
+            "status": new_status,
+            "carrier_id": carrier_id,
+            "driver_id": driver_id,
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error responding to hire request: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Failed to respond to hire request")
+
+
 class DriverAvailabilityRequest(BaseModel):
     is_available: bool
 

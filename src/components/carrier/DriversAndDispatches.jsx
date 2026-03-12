@@ -20,6 +20,11 @@ const DriversAndDispatches = () => {
   const [assigningLoad, setAssigningLoad] = useState(null);
   const [showAllActivity, setShowAllActivity] = useState(false);
   const [isMapFullscreen, setIsMapFullscreen] = useState(false);
+  const [showAddDriverModal, setShowAddDriverModal] = useState(false);
+  const [marketplaceDrivers, setMarketplaceDrivers] = useState([]);
+  const [marketplaceDriversLoading, setMarketplaceDriversLoading] = useState(false);
+  const [marketplaceDriversError, setMarketplaceDriversError] = useState('');
+  const [driverRequestingId, setDriverRequestingId] = useState('');
   const mapHistoryPushedRef = useRef(false);
 
   const parseEpochSeconds = (value) => {
@@ -231,6 +236,76 @@ const DriversAndDispatches = () => {
     }
   }
 
+  const fetchMarketplaceDrivers = async () => {
+    if (!currentUser) return;
+
+    setMarketplaceDriversLoading(true);
+    setMarketplaceDriversError('');
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch(`${API_URL}/drivers?available_only=true`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.detail || 'Failed to load available drivers');
+      }
+
+      setMarketplaceDrivers(Array.isArray(data?.drivers) ? data.drivers : []);
+    } catch (error) {
+      console.error('Error fetching available drivers:', error);
+      setMarketplaceDrivers([]);
+      setMarketplaceDriversError(error?.message || 'Failed to load available drivers');
+    } finally {
+      setMarketplaceDriversLoading(false);
+    }
+  };
+
+  const handleOpenAddDriverModal = () => {
+    setShowAddDriverModal(true);
+    fetchMarketplaceDrivers();
+  };
+
+  const handleCloseAddDriverModal = () => {
+    setShowAddDriverModal(false);
+    setDriverRequestingId('');
+    setMarketplaceDriversError('');
+  };
+
+  const handleSendHireRequest = async (driver) => {
+    if (!currentUser || !driver?.id) return;
+
+    setDriverRequestingId(String(driver.id));
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch(`${API_URL}/drivers/${encodeURIComponent(driver.id)}/hire-request`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.detail || 'Failed to send hire request');
+      }
+
+      const sentRequestId = data?.request?.id;
+      setMarketplaceDrivers((prev) => (prev || []).filter((d) => String(d?.id || '') !== String(driver.id)));
+      alert(sentRequestId ? `Request sent to ${driver.name || 'driver'}. They will receive a notification to accept.` : `Request sent to ${driver.name || 'driver'}.`);
+    } catch (error) {
+      console.error('Error sending hire request:', error);
+      alert(error?.message || 'Failed to send hire request. Please try again.');
+    } finally {
+      setDriverRequestingId('');
+    }
+  };
+
   // Assign load to driver
   const handleAssignLoad = async (driverId, loadId) => {
     if (!currentUser) return;
@@ -251,7 +326,7 @@ const DriversAndDispatches = () => {
         alert('Load assigned successfully!')
         // Refresh drivers and loads
         fetchMyDrivers()
-        fetchAvailableLoads()
+        fetchCarrierLoads()
       } else {
         const error = await response.json()
         alert(`Failed to assign load: ${error.detail || 'Unknown error'}`)
@@ -525,7 +600,7 @@ const DriversAndDispatches = () => {
           <p className="drivers-subtitle">Manage your drivers and dispatch operations</p>
         </div>
         <div className="drivers-actions">
-          <button className="btn small-cd">
+          <button className="btn small-cd" type="button" onClick={handleOpenAddDriverModal}>
             <i className="fas fa-plus"></i>
             Add Driver
           </button>
@@ -1000,6 +1075,100 @@ const DriversAndDispatches = () => {
                 ))
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {showAddDriverModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Add Driver"
+          onClick={handleCloseAddDriverModal}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1200,
+            padding: '16px',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: '760px',
+              maxHeight: '80vh',
+              overflow: 'auto',
+              borderRadius: '14px',
+              background: '#ffffff',
+              border: '1px solid #e5e7eb',
+              boxShadow: '0 25px 45px rgba(15, 23, 42, 0.2)',
+              padding: '18px',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginBottom: '12px' }}>
+              <div>
+                <h3 style={{ margin: 0 }}>Add Driver</h3>
+                <p style={{ margin: '4px 0 0 0', color: '#64748b', fontSize: '13px' }}>
+                  Send a hire request. The driver must accept before joining your fleet.
+                </p>
+              </div>
+              <button type="button" className="btn small ghost-cd" onClick={handleCloseAddDriverModal}>Close</button>
+            </div>
+
+            {marketplaceDriversError && (
+              <div style={{ marginBottom: '10px', padding: '10px 12px', borderRadius: '8px', background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca' }}>
+                {marketplaceDriversError}
+              </div>
+            )}
+
+            {marketplaceDriversLoading ? (
+              <div style={{ padding: '24px', textAlign: 'center', color: '#334155' }}>Loading available drivers...</div>
+            ) : marketplaceDrivers.length === 0 ? (
+              <div style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>No available drivers found right now.</div>
+            ) : (
+              <div style={{ display: 'grid', gap: '10px' }}>
+                {marketplaceDrivers.map((driver) => {
+                  const rawName = String(driver?.name || driver?.full_name || '').trim();
+                  const name = rawName || 'Unknown Driver';
+                  const location = String(driver?.current_location || driver?.current_city || driver?.location || 'Unknown').trim();
+                  const cdl = String(driver?.cdl_class || 'N/A').trim();
+                  const itemId = String(driver?.id || '').trim();
+
+                  return (
+                    <div
+                      key={itemId || name}
+                      style={{
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '10px',
+                        padding: '12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '10px',
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 700, color: '#0f172a' }}>{name}</div>
+                        <div style={{ fontSize: '13px', color: '#475569' }}>Location: {location} | CDL: {cdl}</div>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn small-cd"
+                        onClick={() => handleSendHireRequest({ ...driver, id: itemId, name })}
+                        disabled={!itemId || driverRequestingId === itemId}
+                      >
+                        {driverRequestingId === itemId ? 'Sending...' : 'Send Request'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}

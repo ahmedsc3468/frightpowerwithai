@@ -1,9 +1,42 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import '../../styles/carrier/MyLoads.css';
 import AddLoads from './AddLoads';
 import LoadDetailsModal from './LoadDetailsModal';
 import { API_URL } from '../../config';
 import { auth } from '../../firebase';
+
+const LOAD_COLUMN_KEYS = ['draft', 'tendered', 'accepted', 'inTransit', 'delivered', 'pod', 'invoiced', 'settled'];
+
+function matchesLoadSearch(load, query) {
+  const normalizedQuery = String(query || '').trim().toLowerCase();
+  if (!normalizedQuery) return true;
+
+  const haystack = [
+    load?.id,
+    load?.origin,
+    load?.destination,
+    load?.status,
+    load?.driver,
+    load?.equipment,
+    load?.pickup,
+    load?.invoice,
+    load?.broker,
+    load?.fullData?.reference_number,
+    load?.fullData?.commodity,
+    load?.fullData?.load_type,
+    load?.fullData?.equipment_type,
+    load?.fullData?.assigned_driver_name,
+    load?.fullData?.workflow_status,
+    load?.fullData?.workflow_status_text,
+    load?.fullData?.status,
+    load?.fullData?.load_status,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return haystack.includes(normalizedQuery);
+}
 
 // Modal to display all loads in a grid
 function LoadsModal({ title, items, onClose, onLoadClick }) {
@@ -157,6 +190,7 @@ export default function MyLoads() {
   const [showAddLoads, setShowAddLoads] = useState(false);
   const [resumeLoad, setResumeLoad] = useState(null); // For resuming draft loads
   const [detailsLoad, setDetailsLoad] = useState(null); // For viewing load details from modal cards
+  const [searchTerm, setSearchTerm] = useState('');
   const [loads, setLoads] = useState({
     draft: [],
     tendered: [],
@@ -170,6 +204,13 @@ export default function MyLoads() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [modalOpen, setModalOpen] = useState(null); // Track which modal is open
+
+  const filteredLoads = useMemo(() => {
+    return LOAD_COLUMN_KEYS.reduce((accumulator, columnKey) => {
+      accumulator[columnKey] = (loads[columnKey] || []).filter((load) => matchesLoadSearch(load, searchTerm));
+      return accumulator;
+    }, {});
+  }, [loads, searchTerm]);
 
   // Fetch loads from backend
   useEffect(() => {
@@ -333,7 +374,12 @@ export default function MyLoads() {
         </div>
         <div className="ml-actions">
           <div className="ml-toolbar">
-            <input className="ml-search" placeholder="Search loads..." />
+            <input
+              className="ml-search"
+              placeholder="Search loads..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
             {/* <button className="btn small-cd" onClick={() => setShowAddLoads(true)}>+ Add Load</button> */}
           </div>
         </div>
@@ -349,37 +395,37 @@ export default function MyLoads() {
         /> */}
         <Column 
           title="Tendered" 
-          items={loads.tendered} 
+          items={filteredLoads.tendered} 
           isLoading={isLoading}
           onCardClick={() => openModal('tendered')}
         />
         <Column 
           title="Accepted" 
-          items={loads.accepted} 
+          items={filteredLoads.accepted} 
           isLoading={isLoading}
           onCardClick={() => openModal('accepted')}
         />
         <Column 
           title="In Transit" 
-          items={loads.inTransit} 
+          items={filteredLoads.inTransit} 
           isLoading={isLoading}
           onCardClick={() => openModal('inTransit')}
         />
         <Column 
           title="Delivered" 
-          items={loads.delivered} 
+          items={filteredLoads.delivered} 
           isLoading={isLoading}
           onCardClick={() => openModal('delivered')}
         />
         <Column 
           title="POD" 
-          items={loads.pod} 
+          items={filteredLoads.pod} 
           isLoading={isLoading}
           onCardClick={() => openModal('pod')}
         />
         <Column 
           title="Invoiced" 
-          items={loads.invoiced} 
+          items={filteredLoads.invoiced} 
           isLoading={isLoading}
           onCardClick={() => openModal('invoiced')}
         />
@@ -393,28 +439,28 @@ export default function MyLoads() {
 
       {/* Modals for each load type */}
       {modalOpen === 'draft' && (
-        <LoadsModal title="Draft" items={loads.draft} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
+        <LoadsModal title="Draft" items={filteredLoads.draft} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
       )}
       {modalOpen === 'tendered' && (
-        <LoadsModal title="Tendered" items={loads.tendered} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
+        <LoadsModal title="Tendered" items={filteredLoads.tendered} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
       )}
       {modalOpen === 'accepted' && (
-        <LoadsModal title="Accepted" items={loads.accepted} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
+        <LoadsModal title="Accepted" items={filteredLoads.accepted} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
       )}
       {modalOpen === 'inTransit' && (
-        <LoadsModal title="In Transit" items={loads.inTransit} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
+        <LoadsModal title="In Transit" items={filteredLoads.inTransit} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
       )}
       {modalOpen === 'delivered' && (
-        <LoadsModal title="Delivered" items={loads.delivered} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
+        <LoadsModal title="Delivered" items={filteredLoads.delivered} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
       )}
       {modalOpen === 'pod' && (
-        <LoadsModal title="POD" items={loads.pod} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
+        <LoadsModal title="POD" items={filteredLoads.pod} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
       )}
       {modalOpen === 'invoiced' && (
-        <LoadsModal title="Invoiced" items={loads.invoiced} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
+        <LoadsModal title="Invoiced" items={filteredLoads.invoiced} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
       )}
       {modalOpen === 'settled' && (
-        <LoadsModal title="Settled" items={loads.settled} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
+        <LoadsModal title="Settled" items={filteredLoads.settled} onClose={closeModal} onLoadClick={openDetailsFromModalCard} />
       )}
 
       {/* Nested modal: open when user clicks a specific load card inside the grid modal */}

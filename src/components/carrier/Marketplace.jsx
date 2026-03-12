@@ -415,7 +415,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
     setHiringDriver(driver.id)
     try {
       const token = await currentUser.getIdToken()
-      const response = await fetch(`${API_URL}/drivers/${driver.id}/hire`, {
+      const response = await fetch(`${API_URL}/drivers/${driver.id}/hire-request`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -424,16 +424,16 @@ export default function Marketplace({ activeSection, setActiveSection }) {
       })
 
       if (response.ok) {
-        // Remove driver from list (since they're now hired)
+        // Remove driver from list in current view after request is sent.
         setDrivers(drivers.filter(d => d.id !== driver.id))
-        alert(`Successfully hired ${driver.name}!`)
+        alert(`Request sent to ${driver.name}. They will receive a notification to accept.`)
       } else {
         const error = await response.json()
-        alert(`Failed to hire driver: ${error.detail || 'Unknown error'}`)
+        alert(`Failed to send request: ${error.detail || 'Unknown error'}`)
       }
     } catch (error) {
-      console.error('Error hiring driver:', error)
-      alert('Failed to hire driver. Please try again.')
+      console.error('Error sending hire request:', error)
+      alert('Failed to send request. Please try again.')
     } finally {
       setHiringDriver(null)
     }

@@ -17,6 +17,10 @@ export default function HiringOnboarding({ onNavigate }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
+  const [hireRequestsLoading, setHireRequestsLoading] = useState(false);
+  const [hireRequestsError, setHireRequestsError] = useState('');
+  const [hireRequests, setHireRequests] = useState([]);
+  const [respondingRequestId, setRespondingRequestId] = useState('');
 
   const fetchRequired = useCallback(async () => {
     if (!currentUser) return;
@@ -43,12 +47,38 @@ export default function HiringOnboarding({ onNavigate }) {
     fetchRequired();
   }, [currentUser, fetchRequired]);
 
+  const fetchHireRequests = useCallback(async () => {
+    if (!currentUser) return;
+    setHireRequestsLoading(true);
+    setHireRequestsError('');
+    try {
+      const token = await currentUser.getIdToken();
+      const res = await fetch(`${API_URL}/drivers/hire-requests?status=pending`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.detail || tr('hiringOnboarding.errors.loadHireRequestsFailed', 'Failed to load hire requests'));
+      setHireRequests(Array.isArray(json?.requests) ? json.requests : []);
+    } catch (e) {
+      setHireRequests([]);
+      setHireRequestsError(String(e?.message || e));
+    } finally {
+      setHireRequestsLoading(false);
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    fetchHireRequests();
+  }, [currentUser, fetchHireRequests]);
+
   // Keep statuses in sync when user signs consents (or returns to this tab).
   useEffect(() => {
     if (!currentUser) return;
 
     const refresh = () => {
       fetchRequired();
+      fetchHireRequests();
     };
 
     const onVisibility = () => {
@@ -63,7 +93,34 @@ export default function HiringOnboarding({ onNavigate }) {
       window.removeEventListener('focus', refresh);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [currentUser, fetchRequired]);
+  }, [currentUser, fetchRequired, fetchHireRequests]);
+
+  const handleRespondHireRequest = async (requestId, accept) => {
+    if (!currentUser || !requestId) return;
+    setRespondingRequestId(String(requestId));
+    try {
+      const token = await currentUser.getIdToken();
+      const res = await fetch(`${API_URL}/drivers/hire-requests/${encodeURIComponent(requestId)}/respond`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ accept: Boolean(accept) })
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(json?.detail || tr('hiringOnboarding.errors.respondHireRequestFailed', 'Failed to respond to hire request'));
+
+      setHireRequests((prev) => (prev || []).filter((r) => String(r?.id || '') !== String(requestId)));
+      if (accept && typeof onNavigate === 'function') {
+        onNavigate('carrier');
+      }
+    } catch (e) {
+      alert(String(e?.message || e));
+    } finally {
+      setRespondingRequestId('');
+    }
+  };
 
   const summary = data?.summary || {};
   const required = Array.isArray(data?.required) ? data.required : [];
@@ -161,6 +218,74 @@ export default function HiringOnboarding({ onNavigate }) {
         </div>
       </div>
       </div>
+
+      <section className="ho-section">
+        <h3>{tr('hiringOnboarding.hireRequests.title', 'Carrier Hire Requests')}</h3>
+        {hireRequestsError ? (
+          <div className="ho-info-card" style={{ marginTop: '10px' }}>
+            <i className="fa-solid fa-triangle-exclamation"></i>
+            <div className='ho-info-text'>
+              <h5>{tr('hiringOnboarding.hireRequests.unableToLoad', 'Unable to load hire requests')}</h5>
+              <p>{hireRequestsError}</p>
+              <button className="btn small ghost-cd" onClick={fetchHireRequests}>{tr('hiringOnboarding.actions.retry', 'Retry')}</button>
+            </div>
+          </div>
+        ) : null}
+
+        {hireRequestsLoading ? (
+          <div className="ho-info-card" style={{ marginTop: '10px' }}>
+            <i className="fa-solid fa-spinner fa-spin"></i>
+            <div className='ho-info-text'>
+              <h5>{tr('hiringOnboarding.hireRequests.loadingTitle', 'Checking for new requests')}</h5>
+              <p>{tr('hiringOnboarding.hireRequests.loadingBody', 'Loading carrier hire requests...')}</p>
+            </div>
+          </div>
+        ) : (hireRequests || []).length === 0 ? (
+          <div className="ho-info-card" style={{ marginTop: '10px' }}>
+            <i className="fa-solid fa-inbox"></i>
+            <div className='ho-info-text'>
+              <h5>{tr('hiringOnboarding.hireRequests.noneTitle', 'No pending hire requests')}</h5>
+              <p>{tr('hiringOnboarding.hireRequests.noneBody', 'Carrier invitations will appear here when received.')}</p>
+            </div>
+          </div>
+        ) : (
+          <div className="ho-required-grid" style={{ marginTop: '8px' }}>
+            {hireRequests.map((req) => {
+              const reqId = String(req?.id || '').trim();
+              const carrierName = String(req?.carrier_name || req?.carrier_id || tr('hiringOnboarding.hireRequests.unknownCarrier', 'Carrier')).trim();
+              const sentAt = req?.created_at ? formatDate(Number(req.created_at) * 1000) : '';
+              return (
+                <div key={reqId || carrierName} className="ho-card complete">
+                  <div className="ho-card-header">
+                    <span className="ho-card-title">{carrierName}</span>
+                    <span className="int-status-badge active">{tr('hiringOnboarding.hireRequests.pendingBadge', 'Pending')}</span>
+                  </div>
+                  <p className="ho-card-desc">
+                    {tr('hiringOnboarding.hireRequests.requestMessage', 'This carrier invited you to join their fleet.')}
+                    {sentAt ? ` ${tr('hiringOnboarding.hireRequests.sentAt', 'Sent')}: ${sentAt}` : ''}
+                  </p>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      className="btn btn small-cd"
+                      disabled={!reqId || respondingRequestId === reqId}
+                      onClick={() => handleRespondHireRequest(reqId, true)}
+                    >
+                      {respondingRequestId === reqId ? tr('hiringOnboarding.hireRequests.responding', 'Submitting...') : tr('hiringOnboarding.hireRequests.accept', 'Accept Request')}
+                    </button>
+                    <button
+                      className="btn small ghost-cd"
+                      disabled={!reqId || respondingRequestId === reqId}
+                      onClick={() => handleRespondHireRequest(reqId, false)}
+                    >
+                      {tr('hiringOnboarding.hireRequests.decline', 'Decline')}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       <section className="ho-section">
         <h3>{tr('hiringOnboarding.requiredSection.title', 'Required Documents & Information')}</h3>
