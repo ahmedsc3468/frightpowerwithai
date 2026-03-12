@@ -1632,7 +1632,7 @@ export default function Settings() {
                     >
                       <option>English</option>
                       <option>Spanish</option>
-                      <option>French</option>
+                      <option>Arabic</option>
                     </select>
                   </div>
                 </div>

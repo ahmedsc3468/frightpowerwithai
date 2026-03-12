@@ -24,6 +24,8 @@ import logo from '/src/assets/logo.png';
 import resp_logo from '/src/assets/logo_1.png';
 import { getJson, postJson } from '../../api/http';
 import { useAuth } from '../../contexts/AuthContext';
+import { useUserSettings } from '../../contexts/UserSettingsContext';
+import { t } from '../../i18n/translate';
 import UserDetailsModal from './UserDetailsModal';
 import { AUTO_REFRESH_MS } from '../../constants/refresh';
 
@@ -31,6 +33,8 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { section } = useParams();
   const { currentUser, userRole, logout } = useAuth();
+  const { settings } = useUserSettings();
+  const language = settings?.language || 'English';
 
   const [activeNav, setActiveNav] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -60,42 +64,42 @@ export default function AdminDashboard() {
 
   const navGroups = [
     {
-      title: 'OVERVIEW',
+      title: t(language, 'nav.overview', 'OVERVIEW'),
       items: [
-        { key: 'dashboard', label: 'Dashboard', icon: 'fa-solid fa-house' },
-        { key: 'tracking', label: 'Tracking & Visibility', icon: 'fa-solid fa-location-dot' },
-        { key: 'analytics', label: 'Analytics', icon: 'fa-solid fa-chart-line' }
+        { key: 'dashboard', label: t(language, 'nav.dashboard', 'Dashboard'), icon: 'fa-solid fa-house' },
+        { key: 'tracking', label: t(language, 'nav.tracking', 'Tracking & Visibility'), icon: 'fa-solid fa-location-dot' },
+        { key: 'analytics', label: t(language, 'nav.analytics', 'Analytics'), icon: 'fa-solid fa-chart-line' }
       ]
     },
     {
-      title: 'MANAGEMENT',
+      title: t(language, 'nav.management', 'MANAGEMENT'),
       items: [
-        { key: 'users', label: 'Users & Roles', icon: 'fa-solid fa-users' },
-        { key: 'carriers', label: 'Carriers', icon: 'fa-solid fa-truck' },
-        { key: 'shippers', label: 'Shippers / Brokers', icon: 'fa-solid fa-people-group' },
-        { key: 'drivers', label: 'Drivers', icon: 'fa-solid fa-person' },
-        { key: 'service-providers', label: 'Service Providers', icon: 'fa-solid fa-briefcase' },
-        { key: 'marketplace', label: 'Marketplace', icon: 'fa-solid fa-store' }
+        { key: 'users', label: t(language, 'nav.usersRoles', 'Users & Roles'), icon: 'fa-solid fa-users' },
+        { key: 'carriers', label: t(language, 'nav.carriers', 'Carriers'), icon: 'fa-solid fa-truck' },
+        { key: 'shippers', label: t(language, 'nav.shippersBrokers', 'Shippers / Brokers'), icon: 'fa-solid fa-people-group' },
+        { key: 'drivers', label: t(language, 'nav.drivers', 'Drivers'), icon: 'fa-solid fa-person' },
+        { key: 'service-providers', label: t(language, 'nav.serviceProviders', 'Service Providers'), icon: 'fa-solid fa-briefcase' },
+        { key: 'marketplace', label: t(language, 'nav.marketplace', 'Marketplace'), icon: 'fa-solid fa-store' }
       ]
     },
     {
-      title: 'OPERATIONS',
+      title: t(language, 'nav.operations', 'OPERATIONS'),
       items: [
-        { key: 'document-vault', label: 'Document Vault', icon: 'fa-regular fa-folder' },
-        { key: 'compliance-audit', label: 'Compliance & Audit', icon: 'fa-solid fa-shield-halved' },
-        { key: 'messages', label: 'Messages', icon: 'fa-solid fa-envelope' },
-        { key: 'tasks', label: 'Tasks / To-Do', icon: 'fa-solid fa-list-check' },
-        { key: 'hiring', label: 'Hiring & Onboarding', icon: 'fa-solid fa-user-plus' }
+        { key: 'document-vault', label: t(language, 'nav.docs', 'Document Vault'), icon: 'fa-regular fa-folder' },
+        { key: 'compliance-audit', label: t(language, 'nav.complianceAudit', 'Compliance & Audit'), icon: 'fa-solid fa-shield-halved' },
+        { key: 'messages', label: t(language, 'nav.messages', 'Messages'), icon: 'fa-solid fa-envelope' },
+        { key: 'tasks', label: t(language, 'nav.tasks', 'Tasks / To-Do'), icon: 'fa-solid fa-list-check' },
+        { key: 'hiring', label: t(language, 'nav.hiring', 'Hiring & Onboarding'), icon: 'fa-solid fa-user-plus' }
       ]
     },
     {
-      title: 'SYSTEM & TOOLS',
+      title: t(language, 'nav.systemTools', 'SYSTEM & TOOLS'),
       items: [
-        { key: 'support', label: 'Support Hub', icon: 'fa-regular fa-circle-question' },
-        { key: 'system-settings', label: 'System Settings', icon: 'fa-solid fa-gear' },
-        { key: 'my-profile', label: 'My Profile', icon: 'fa-regular fa-user' },
-        { key: 'notifications', label: 'Alerts & Notifications', icon: 'fa-regular fa-bell' },
-        { key: 'logout', label: 'Logout', icon: 'fa-solid fa-right-from-bracket' }
+        { key: 'support', label: t(language, 'nav.helpHub', 'Support Hub'), icon: 'fa-regular fa-circle-question' },
+        { key: 'system-settings', label: t(language, 'nav.systemSettings', 'System Settings'), icon: 'fa-solid fa-gear' },
+        { key: 'my-profile', label: t(language, 'nav.myProfile', 'My Profile'), icon: 'fa-regular fa-user' },
+        { key: 'notifications', label: t(language, 'nav.alerts', 'Alerts & Notifications'), icon: 'fa-regular fa-bell' },
+        { key: 'logout', label: t(language, 'nav.logout', 'Logout'), icon: 'fa-solid fa-right-from-bracket' }
       ]
     }
   ];
@@ -305,7 +309,7 @@ export default function AdminDashboard() {
       <div className="fp-topbar">
         <div className="topbar-row topbar-row-1">
           <div className="topbar-left" style={{display:'flex',alignItems:'center',gap:12}}>
-            <button className="hamburger" aria-label="Open sidebar" onClick={() => setIsSidebarOpen(true)}>
+            <button className="hamburger" aria-label={t(language, 'dashboard.openSidebar', 'Open sidebar')} onClick={() => setIsSidebarOpen(true)}>
               <i className="fa-solid fa-bars" />
             </button>
             <div className="brand-block" style={{display:'flex',alignItems:'center',gap:12}}>
@@ -322,7 +326,7 @@ export default function AdminDashboard() {
             <div className="search-input-container" style={{width:720,maxWidth:'70%'}}>
               <input
                 className="search-input"
-                placeholder="Search users by name/email/DOT/MC/CDL..."
+                placeholder={t(language, 'dashboard.searchUsersPlaceholder', 'Search users by name/email/DOT/MC/CDL...')}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onFocus={() => setSearchOpen(true)}
@@ -335,7 +339,7 @@ export default function AdminDashboard() {
                   role="listbox"
                   aria-label="User search results"
                 >
-                  {searchLoading && <div className="adm-search-row muted">Searching…</div>}
+                  {searchLoading && <div className="adm-search-row muted">{t(language, 'common.loading', 'Loading…')}</div>}
                   {!!searchError && !searchLoading && <div className="adm-search-row error">{searchError}</div>}
 
                   {!searchLoading && !searchError && (searchItems || []).map((it) => (
@@ -364,7 +368,7 @@ export default function AdminDashboard() {
                   ))}
 
                   {!searchLoading && !searchError && (searchItems?.length || 0) === 0 && String(searchQuery || '').trim().length >= 2 && (
-                    <div className="adm-search-row muted">No matches</div>
+                    <div className="adm-search-row muted">{t(language, 'dashboard.noMatches', 'No matches')}</div>
                   )}
                 </div>
               )}
@@ -460,18 +464,18 @@ export default function AdminDashboard() {
           </nav>
           {/* Dark mode control - toggles site theme when clicked */}
           <div className="sidebar-dark-control" aria-hidden="false">
-            <span className="dark-label">Dark Mode</span>
+            <span className="dark-label">{t(language, 'dashboard.darkMode', 'Dark Mode')}</span>
             <button
               className={`dark-toggle ${isDarkMode ? 'on' : ''}`}
               aria-pressed={isDarkMode}
-              aria-label="Toggle dark mode"
+              aria-label={t(language, 'dashboard.toggleDarkMode', 'Toggle dark mode')}
               onClick={() => setIsDarkMode((s) => !s)}
             >
               <span className="dark-toggle-knob" />
             </button>
           </div>
 
-          <button className="sidebar-close" aria-label="Close sidebar" onClick={() => setIsSidebarOpen(false)}>
+          <button className="sidebar-close" aria-label={t(language, 'dashboard.closeSidebar', 'Close sidebar')} onClick={() => setIsSidebarOpen(false)}>
             <i className="fa-solid fa-xmark" />
           </button>
         </aside>
@@ -576,8 +580,8 @@ export default function AdminDashboard() {
             <>
             <header className="fp-header">
             <div className="fp-header-titles">
-              <h2>Welcome, {adminName} <span role="img" aria-label="wave">👋</span></h2>
-              <p className="fp-subtitle">Role: {adminRoleLabel} — Last login: Recently</p>
+              <h2>{t(language, 'dashboard.welcome', 'Welcome')}, {adminName} <span role="img" aria-label="wave">👋</span></h2>
+              <p className="fp-subtitle">{t(language, 'dashboard.role', 'Role')}: {adminRoleLabel} - {t(language, 'dashboard.lastLogin', 'Last login')}: {t(language, 'dashboard.recently', 'Recently')}</p>
             </div>
           </header>
 
@@ -597,42 +601,42 @@ export default function AdminDashboard() {
 
           {metricsError && (
             <div className="card" style={{ padding: 14, borderColor: '#fecaca', background: '#fff1f2' }}>
-              <div style={{ fontWeight: 800, marginBottom: 4 }}>Dashboard metrics unavailable</div>
+              <div style={{ fontWeight: 800, marginBottom: 4 }}>{t(language, 'dashboard.metricsUnavailable', 'Dashboard metrics unavailable')}</div>
               <div className="muted">{metricsError}</div>
             </div>
           )}
             <section className="fp-grid">
             <div className="card stats-card">
-              <div className="card-headers"><h3>Pending Documents</h3><i className="fa-regular fa-file card-icon"/></div>
+              <div className="card-headers"><h3>{t(language, 'dashboard.pendingDocuments', 'Pending Documents')}</h3><i className="fa-regular fa-file card-icon"/></div>
               <div className="statss"><div>{metricsLoading ? '—' : (dashboardMetrics?.pending_documents ?? '—')}</div></div>
             </div>
 
             <div className="card stats-card">
-              <div className="card-headers"><h3>Active Carriers</h3><i className="fa-solid fa-truck card-icon"/></div>
+              <div className="card-headers"><h3>{t(language, 'dashboard.activeCarriers', 'Active Carriers')}</h3><i className="fa-solid fa-truck card-icon"/></div>
               <div className="statss"><div>{metricsLoading ? '—' : (dashboardMetrics?.active_carriers ?? '—')}</div></div>
             </div>
 
             <div className="card stats-card">
-              <div className="card-headers"><h3>Active Drivers</h3><i className="fa-solid fa-user card-icon"/></div>
+              <div className="card-headers"><h3>{t(language, 'dashboard.activeDrivers', 'Active Drivers')}</h3><i className="fa-solid fa-user card-icon"/></div>
               <div className="statss"><div>{metricsLoading ? '—' : (dashboardMetrics?.active_drivers ?? '—')}</div></div>
             </div>
 
             <div className="card stats-card">
-              <div className="card-headers"><h3>Pending Onboardings</h3><i className="fa-solid fa-hourglass-half card-icon"/></div>
+              <div className="card-headers"><h3>{t(language, 'dashboard.pendingOnboardings', 'Pending Onboardings')}</h3><i className="fa-solid fa-hourglass-half card-icon"/></div>
               <div className="statss"><div>{metricsLoading ? '—' : (dashboardMetrics?.pending_onboardings ?? '—')}</div></div>
             </div>
 
             <div className="card stats-card">
-              <div className="card-headers"><h3>Support Tickets</h3><i className="fa-solid fa-ticket card-icon"/></div>
+              <div className="card-headers"><h3>{t(language, 'dashboard.supportTickets', 'Support Tickets')}</h3><i className="fa-solid fa-ticket card-icon"/></div>
               <div className="statss"><div>{metricsLoading ? '—' : (dashboardMetrics?.support_tickets ?? '—')}</div></div>
             </div>
 
             <div className="card stats-card">
-              <div className="card-headers"><h3>Compliance Rate</h3><i className="fa-solid fa-shield-halved card-icon"/></div>
+              <div className="card-headers"><h3>{t(language, 'dashboard.complianceRate', 'Compliance Rate')}</h3><i className="fa-solid fa-shield-halved card-icon"/></div>
               <div className="statss"><div>
                 {metricsLoading ? '—' : `${Number(dashboardMetrics?.compliance_rate_percent ?? 0).toFixed(1)}%`}
                 <span style={{ marginLeft: 10, color: Number(dashboardMetrics?.compliance_delta_percent ?? 0) >= 0 ? '#16a34a' : '#dc2626' }}>
-                  {metricsLoading ? '' : `${Number(dashboardMetrics?.compliance_delta_percent ?? 0) >= 0 ? '+' : ''}${Number(dashboardMetrics?.compliance_delta_percent ?? 0).toFixed(1)}% this week`}
+                  {metricsLoading ? '' : `${Number(dashboardMetrics?.compliance_delta_percent ?? 0) >= 0 ? '+' : ''}${Number(dashboardMetrics?.compliance_delta_percent ?? 0).toFixed(1)}% ${t(language, 'dashboard.thisWeek', 'this week')}`}
                 </span>
               </div></div>
             </div>
@@ -642,82 +646,82 @@ export default function AdminDashboard() {
           <section className="adm-lower-grid">
             <div>
               <div className="card recent-activity-card">
-                <div className="card-row"><h3>Recent Activity</h3></div>
+                <div className="card-row"><h3>{t(language, 'dashboard.recentActivity', 'Recent Activity')}</h3></div>
                 <ul className="recent-list">
                   <li className="msg-item">
                     <div className="msg-body">
-                      <div className="msg-head"><strong>Carrier "SpeedFast LLC"</strong> <span className="muted">submitted insurance doc</span></div>
+                      <div className="msg-head"><strong>Carrier "SpeedFast LLC"</strong> <span className="muted">{t(language, 'admin.activity.submittedInsuranceDoc', 'submitted insurance doc')}</span></div>
                       <div className="muted">09:12 AM</div>
                     </div>
-                    <div className="tag"><span className="int-status-badge resolved">Verified</span></div>
+                    <div className="tag"><span className="int-status-badge resolved">{t(language, 'common.verified', 'Verified')}</span></div>
                   </li>
 
                   <li className="msg-item">
                     <div className="msg-body">
-                      <div className="msg-head"><strong>Driver "John M."</strong> <span className="muted">completed onboarding</span></div>
+                      <div className="msg-head"><strong>Driver "John M."</strong> <span className="muted">{t(language, 'admin.activity.completedOnboarding', 'completed onboarding')}</span></div>
                       <div className="muted">09:09 AM</div>
                     </div>
-                    <div className="tag"><span className="int-status-badge resolved">Approved</span></div>
+                    <div className="tag"><span className="int-status-badge resolved">{t(language, 'common.approved', 'Approved')}</span></div>
                   </li>
 
                   <li className="msg-item">
                     <div className="msg-body">
-                      <div className="msg-head"><strong>Ticket #1023</strong> <span className="muted">resolved by Sub-Admin</span></div>
+                      <div className="msg-head"><strong>Ticket #1023</strong> <span className="muted">{t(language, 'admin.activity.resolvedBySubAdmin', 'resolved by Sub-Admin')}</span></div>
                       <div className="muted">08:55 AM</div>
                     </div>
-                    <div className="tag"><span className="int-status-badge resolved">Closed</span></div>
+                    <div className="tag"><span className="int-status-badge resolved">{t(language, 'common.closed', 'Closed')}</span></div>
                   </li>
 
                   <li className="msg-item">
                     <div className="msg-body">
-                      <div className="msg-head"><strong>Compliance form</strong> <span className="muted">flagged missing signature</span></div>
+                      <div className="msg-head"><strong>Compliance form</strong> <span className="muted">{t(language, 'admin.activity.flaggedMissingSignature', 'flagged missing signature')}</span></div>
                       <div className="muted">08:40 AM</div>
                     </div>
-                    <div className="tag"><span className="int-status-badge pending">Attention</span></div>
+                    <div className="tag"><span className="int-status-badge pending">{t(language, 'common.attention', 'Attention')}</span></div>
                   </li>
                 </ul>
-                <div style={{marginTop:12}}><a className="view-all">View All Activity Logs</a></div>
+                <div style={{marginTop:12}}><a className="view-all">{t(language, 'dashboard.viewAllActivityLogs', 'View All Activity Logs')}</a></div>
               </div>
 
               <div className="card tasks-card" style={{marginTop:18}}>
-                <div className="card-row"><h3>Tasks & To-Do</h3>
+                <div className="card-row"><h3>{t(language, 'dashboard.tasksTodo', 'Tasks & To-Do')}</h3>
                   <div style={{marginBottom: '10px', gap:'8px', display:'flex'}}>
-                    <button className="btn small-cd">+ New Task</button>
-                    <button className="btn ghost-cd small">Open Task Board</button>
+                    <button className="btn small-cd">+ {t(language, 'dashboard.newTask', 'New Task')}</button>
+                    <button className="btn ghost-cd small">{t(language, 'dashboard.openTaskBoard', 'Open Task Board')}</button>
                   </div>
                 </div>
                 <ul className="recent-list">
-                  <li className="task-item"><strong>Review new carrier onboarding</strong><div className="muted">Assigned to: You</div><div className="task-due muted">Due: Today <span className="int-status-badge pending">Pending</span></div></li>
-                  <li className="task-item"><strong>Verify driver logs</strong><div className="muted">Assigned to: Koshin A.</div><div className="task-due muted">Due: Tomorrow <span className="int-status-badge in-progress">In Progress</span></div></li>
-                  <li className="task-item"><strong>Resolve support ticket #1044</strong><div className="muted">Assigned to: Amina Y.</div><div className="task-due muted">Due: Today <span className="int-status-badge resolved">Resolved</span></div></li>
+                  <li className="task-item"><strong>{t(language, 'admin.task.reviewCarrierOnboarding', 'Review new carrier onboarding')}</strong><div className="muted">{t(language, 'admin.task.assignedTo', 'Assigned to:')} {t(language, 'common.you', 'You')}</div><div className="task-due muted">{t(language, 'admin.task.due', 'Due:')} {t(language, 'common.today', 'Today')} <span className="int-status-badge pending">{t(language, 'common.pending', 'Pending')}</span></div></li>
+                  <li className="task-item"><strong>{t(language, 'admin.task.verifyDriverLogs', 'Verify driver logs')}</strong><div className="muted">{t(language, 'admin.task.assignedTo', 'Assigned to:')} Koshin A.</div><div className="task-due muted">{t(language, 'admin.task.due', 'Due:')} {t(language, 'common.tomorrow', 'Tomorrow')} <span className="int-status-badge in-progress">{t(language, 'common.inProgress', 'In Progress')}</span></div></li>
+                  <li className="task-item"><strong>{t(language, 'admin.task.resolveSupportTicket1044', 'Resolve support ticket #1044')}</strong><div className="muted">{t(language, 'admin.task.assignedTo', 'Assigned to:')} Amina Y.</div><div className="task-due muted">{t(language, 'admin.task.due', 'Due:')} {t(language, 'common.today', 'Today')} <span className="int-status-badge resolved">{t(language, 'common.resolved', 'Resolved')}</span></div></li>
                 </ul>
               </div>
             </div>
 
             <aside>
               <div className="card notifications-card">
-                <div className="card-row"><h3>Support Hub</h3></div>
+                <div className="card-row"><h3>{t(language, 'nav.helpHub', 'Support Hub')}</h3></div>
                 <ul className="notifications-list">
-                  <li className="notification-item"><div className="note-left"></div><div className="note-body"><div className="note-title" >#1045 - Login Issues</div><div className="note-sub muted">2 hours ago</div></div><div className="note-time"><span className="int-status-badge revoked">High</span></div></li>
-                  <li className="notification-item"><div className="note-left"></div><div className="note-body"><div className="note-title">#1046 - Document Upload</div><div className="note-sub muted">4 hours ago</div></div><div className="note-time"><span className="int-status-badge pending">Medium</span></div></li>
-                  <li className="notification-item"><div className="note-left"></div><div className="note-body"><div className="note-title">#1047 - Profile Update</div><div className="note-sub muted">6 hours ago</div></div><div className="note-time"><span className="int-status-badge active">Low</span></div></li>
+                  <li className="notification-item"><div className="note-left"></div><div className="note-body"><div className="note-title" >#1045 - {t(language, 'admin.ticket.loginIssues', 'Login Issues')}</div><div className="note-sub muted">2 hours ago</div></div><div className="note-time"><span className="int-status-badge revoked">{t(language, 'common.high', 'High')}</span></div></li>
+                  <li className="notification-item"><div className="note-left"></div><div className="note-body"><div className="note-title">#1046 - {t(language, 'admin.ticket.documentUpload', 'Document Upload')}</div><div className="note-sub muted">4 hours ago</div></div><div className="note-time"><span className="int-status-badge pending">{t(language, 'common.medium', 'Medium')}</span></div></li>
+                  <li className="notification-item"><div className="note-left"></div><div className="note-body"><div className="note-title">#1047 - {t(language, 'admin.ticket.profileUpdate', 'Profile Update')}</div><div className="note-sub muted">6 hours ago</div></div><div className="note-time"><span className="int-status-badge active">{t(language, 'common.low', 'Low')}</span></div></li>
                 </ul>
-                <div style={{marginTop:12}}><button className="btn small-cd">View All Tickets</button></div>
+                <div style={{marginTop:12}}><button className="btn small-cd">{t(language, 'dashboard.viewAllTickets', 'View All Tickets')}</button></div>
               </div>
 
               <div className="card recent-messages" style={{marginTop:18}}>
-                <div className="card-row"><h3>Recent Messages</h3></div>
+                <div className="card-row"><h3>{t(language, 'dashboard.recentMessages', 'Recent Messages')}</h3></div>
                 <ul className="recent-list">
                   {recentUnreadLoading && (
-                    <li className="msg-item"><div className="msg-body"><div className="muted">Loading unread messages…</div></div></li>
+                    <li className="msg-item"><div className="msg-body"><div className="muted">{t(language, 'dashboard.loadingUnreadMessages', 'Loading unread messages…')}</div></div></li>
                   )}
                   {!recentUnreadLoading && (recentUnreadThreads || []).length === 0 && (
-                    <li className="msg-item"><div className="msg-body"><div className="muted">No unread chats.</div></div></li>
+                    <li className="msg-item"><div className="msg-body"><div className="muted">{t(language, 'dashboard.noUnreadChats', 'No unread chats.')}</div></div></li>
                   )}
 
                   {!recentUnreadLoading && (recentUnreadThreads || []).map((t) => {
-                    const title = t?.display_title || t?.other_display_name || t?.title || 'Conversation';
-                    const preview = t?.last_message?.text || t?.last_message?.message || t?.last_message?.content || 'Unread message';
+                    const title = t?.display_title || t?.other_display_name || t?.title || t(language, 'dashboard.conversation', 'Conversation');
+                    const preview = t?.last_message?.text || t?.last_message?.message || t?.last_message?.content || t(language, 'dashboard.unreadMessage', 'Unread message');
                     return (
                       <li key={t?.id} className="msg-item">
                         <button
@@ -731,14 +735,14 @@ export default function AdminDashboard() {
                           <img className="msg-avatar" src={t?.other_photo_url || 'https://www.gravatar.com/avatar/?d=mp'} alt="avatar" />
                           <div className="msg-body">
                             <div className="msg-head"><strong>{title}</strong> <span className="muted">{String(preview).slice(0, 60)}</span></div>
-                            <div className="muted">Unread</div>
+                            <div className="muted">{t(language, 'dashboard.unread', 'Unread')}</div>
                           </div>
                         </button>
                       </li>
                     );
                   })}
                 </ul>
-                <div style={{marginTop:12}}><a className="view-all">View All Messages</a></div>
+                <div style={{marginTop:12}}><a className="view-all">{t(language, 'common.viewAllMessages', 'View All Messages')}</a></div>
               </div>
             </aside>
           </section>

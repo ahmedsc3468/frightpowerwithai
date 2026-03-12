@@ -23,6 +23,8 @@ import ShipperMyLoads from './MyLoads';
 import Bills from './Bills';
 import AlertsNotifications from '../carrier/AlertsNotifications';
 import ShipperProfile from './ShipperProfile';
+import { useUserSettings } from '../../contexts/UserSettingsContext';
+import { t } from '../../i18n/translate';
 import '../../styles/shipper/InviteCarrierModal.css';
 // OnboardingCoach removed - compliance data now shown in Compliance & Safety page
 import logo from '/src/assets/logo.png';
@@ -30,6 +32,8 @@ import resp_logo from '/src/assets/logo_1.png';
 
 export default function ShipperDashboard() {
   const { currentUser, logout } = useAuth();
+  const { settings } = useUserSettings();
+  const language = settings?.language || 'English';
   const navigate = useNavigate();
   const location = useLocation();
   const [activeNav, setActiveNav] = useState('home');
@@ -509,35 +513,35 @@ export default function ShipperDashboard() {
 
   const navGroups = [
     {
-      title: 'OPERATE',
+      title: t(language, 'nav.operate', 'OPERATE'),
       items: [
-        { key: 'home', label: 'Dashboard', icon: 'fa-solid fa-house' },
-        { key: 'my-loads', label: 'My Loads', icon: 'fa-solid fa-truck' },
-        { key: 'my-carriers', label: 'My Carriers', icon: 'fa-solid fa-people-group' },
-        { key: 'marketplace', label: 'Marketplace', icon: 'fa-solid fa-store' },
-        { key: 'messaging', label: 'Messaging', icon: 'fa-solid fa-comments' },
-        { key: 'alerts', label: 'Alerts & Notifications', icon: 'fa-solid fa-bell' },
-        { key: 'carrier-bids', label: 'Carrier Bids', icon: 'fa-solid fa-hand-holding-dollar' },
-        { key: 'tracking', label: 'Tracking & Visibility', icon: 'fa-solid fa-location-crosshairs' },
-        { key: 'doc-vault', label: 'Document Vault', icon: 'fa-solid fa-folder' },
+        { key: 'home', label: t(language, 'nav.dashboard', 'Dashboard'), icon: 'fa-solid fa-house' },
+        { key: 'my-loads', label: t(language, 'nav.myLoads', 'My Loads'), icon: 'fa-solid fa-truck' },
+        { key: 'my-carriers', label: t(language, 'nav.myCarriers', 'My Carriers'), icon: 'fa-solid fa-people-group' },
+        { key: 'marketplace', label: t(language, 'nav.marketplace', 'Marketplace'), icon: 'fa-solid fa-store' },
+        { key: 'messaging', label: t(language, 'nav.messaging', 'Messaging'), icon: 'fa-solid fa-comments' },
+        { key: 'alerts', label: t(language, 'nav.alerts', 'Alerts & Notifications'), icon: 'fa-solid fa-bell' },
+        { key: 'carrier-bids', label: t(language, 'nav.carrierBids', 'Carrier Bids'), icon: 'fa-solid fa-hand-holding-dollar' },
+        { key: 'tracking', label: t(language, 'nav.trackingVisibility', 'Tracking & Visibility'), icon: 'fa-solid fa-location-crosshairs' },
+        { key: 'doc-vault', label: t(language, 'nav.docs', 'Document Vault'), icon: 'fa-solid fa-folder' },
       ]
     },
     {
-      title: 'MANAGE',
+      title: t(language, 'nav.manage', 'MANAGE'),
       items: [
-        { key: 'finance', label: 'Finance', icon: 'fa-solid fa-wallet' },
-        { key: 'bills', label: 'Invoices / Bills', icon: 'fa-solid fa-file-invoice-dollar' },
-        { key: 'compliance', label: 'Compliance', icon: 'fa-solid fa-shield-halved' },
-        { key: 'analytics', label: 'Analytics', icon: 'fa-solid fa-chart-column' }
+        { key: 'finance', label: t(language, 'nav.finance', 'Finance'), icon: 'fa-solid fa-wallet' },
+        { key: 'bills', label: t(language, 'nav.financeBilling', 'Invoices / Bills'), icon: 'fa-solid fa-file-invoice-dollar' },
+        { key: 'compliance', label: t(language, 'nav.compliance', 'Compliance'), icon: 'fa-solid fa-shield-halved' },
+        { key: 'analytics', label: t(language, 'nav.analytics', 'Analytics'), icon: 'fa-solid fa-chart-column' }
       ]
     },
     {
-      title: 'SYSTEM',
+      title: t(language, 'nav.system', 'SYSTEM'),
       items: [
-        { key: 'profile', label: 'Profile', icon: 'fa-solid fa-user' },
-        { key: 'settings', label: 'Settings', icon: 'fa-solid fa-gear' },
-        { key: 'help', label: 'AI Hub', icon: 'fa-regular fa-circle-question' },
-        { key: 'logout', label: 'Logout', icon: 'fa-solid fa-right-from-bracket' }
+        { key: 'profile', label: t(language, 'nav.profile', 'Profile'), icon: 'fa-solid fa-user' },
+        { key: 'settings', label: t(language, 'nav.settings', 'Settings'), icon: 'fa-solid fa-gear' },
+        { key: 'help', label: t(language, 'nav.aiHub', 'AI Hub'), icon: 'fa-regular fa-circle-question' },
+        { key: 'logout', label: t(language, 'nav.logout', 'Logout'), icon: 'fa-solid fa-right-from-bracket' }
       ]
     }
   ];
@@ -718,9 +722,9 @@ export default function ShipperDashboard() {
       <>
         <header className="fp-header">
           <div className="fp-header-controls">
-            <button className="btn small-cd" onClick={() => setShowAddLoads(true)}>+ Create Load</button>
-            <button className="btn small ghost-cd" onClick={() => setIsInviteCarrierOpen(true)}>Invite Carrier</button>
-            <button className="btn small ghost-cd" onClick={() => fileInputRef.current?.click()}>Upload Document</button>
+            <button className="btn small-cd" onClick={() => setShowAddLoads(true)}>+ {t(language, 'shipper.createLoad', 'Create Load')}</button>
+            <button className="btn small ghost-cd" onClick={() => setIsInviteCarrierOpen(true)}>{t(language, 'shipper.inviteCarrier', 'Invite Carrier')}</button>
+            <button className="btn small ghost-cd" onClick={() => fileInputRef.current?.click()}>{t(language, 'dashboard.uploadDocument', 'Upload Document')}</button>
             <input 
               type="file" 
               ref={fileInputRef} 
@@ -749,32 +753,32 @@ export default function ShipperDashboard() {
           <section style={{ marginBottom: '20px' }}>
             <div className="card" style={{ padding: '20px', background: '#f8fafc' }}>
               <div className="card-header">
-                <h3><i className="fa-solid fa-building" style={{ marginRight: '8px' }}></i>Business Profile</h3>
+                <h3><i className="fa-solid fa-building" style={{ marginRight: '8px' }}></i>{t(language, 'shipper.businessProfile', 'Business Profile')}</h3>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginTop: '16px' }}>
                 {shipperProfile.data.businessName && (
-                  <div><strong>Business:</strong> {shipperProfile.data.businessName}</div>
+                  <div><strong>{t(language, 'shipper.businessLabel', 'Business:')}</strong> {shipperProfile.data.businessName}</div>
                 )}
                 {shipperProfile.data.businessType && (
-                  <div><strong>Type:</strong> {shipperProfile.data.businessType}</div>
+                  <div><strong>{t(language, 'shipper.typeLabel', 'Type:')}</strong> {shipperProfile.data.businessType}</div>
                 )}
                 {shipperProfile.data.contactFullName && (
-                  <div><strong>Contact:</strong> {shipperProfile.data.contactFullName}</div>
+                  <div><strong>{t(language, 'shipper.contactLabel', 'Contact:')}</strong> {shipperProfile.data.contactFullName}</div>
                 )}
                 {shipperProfile.data.contactEmail && (
-                  <div><strong>Email:</strong> {shipperProfile.data.contactEmail}</div>
+                  <div><strong>{t(language, 'shipper.emailLabel', 'Email:')}</strong> {shipperProfile.data.contactEmail}</div>
                 )}
                 {shipperProfile.data.freightType && (
-                  <div><strong>Freight Type:</strong> {shipperProfile.data.freightType}</div>
+                  <div><strong>{t(language, 'shipper.freightTypeLabel', 'Freight Type:')}</strong> {shipperProfile.data.freightType}</div>
                 )}
                 {shipperProfile.data.regionsOfOperation && (
-                  <div><strong>Regions:</strong> {shipperProfile.data.regionsOfOperation}</div>
+                  <div><strong>{t(language, 'shipper.regionsLabel', 'Regions:')}</strong> {shipperProfile.data.regionsOfOperation}</div>
                 )}
               </div>
               {!shipperProfile.onboarding_completed && (
                 <div style={{ marginTop: '16px', padding: '12px', background: '#fef3c7', borderRadius: '8px', color: '#92400e' }}>
                   <i className="fa-solid fa-exclamation-triangle" style={{ marginRight: '8px' }}></i>
-                  Onboarding not complete. <button onClick={() => setActiveNav('profile')} style={{ background: 'none', border: 'none', color: '#1d4ed8', textDecoration: 'underline', cursor: 'pointer', padding: 0 }}>Complete your profile</button>
+                  {t(language, 'shipper.onboardingNotComplete', 'Onboarding not complete.')} <button onClick={() => setActiveNav('profile')} style={{ background: 'none', border: 'none', color: '#1d4ed8', textDecoration: 'underline', cursor: 'pointer', padding: 0 }}>{t(language, 'shipper.completeProfile', 'Complete your profile')}</button>
                 </div>
               )}
             </div>
@@ -786,15 +790,15 @@ export default function ShipperDashboard() {
         <section className="top-stats">
           <div className="card sd-small-card">
             <div className="sd-small-card-row">
-              <h4>Active Loads</h4>
+              <h4>{t(language, 'dashboard.activeLoads', 'Active Loads')}</h4>
               <i className="fa-solid fa-truck" aria-hidden="true" />
             </div>
             <div className="big">{statsLoading ? '...' : (dashboardStats?.active_loads || 0)}</div>
-            <div className="small-sub-active">+{dashboardStats?.active_loads_today || 0} today</div>
+            <div className="small-sub-active">+{dashboardStats?.active_loads_today || 0} {t(language, 'common.today', 'today')}</div>
           </div>
           <div className="card sd-small-card">
             <div className="sd-small-card-row">
-              <h4>On-Time %</h4>
+              <h4>{t(language, 'shipper.onTimePercent', 'On-Time %')}</h4>
               <i className="fa-solid fa-clock" aria-hidden="true" />
             </div>
             <div className="big green">{statsLoading ? '...' : `${dashboardStats?.on_time_percentage || 0}%`}</div>
@@ -802,7 +806,7 @@ export default function ShipperDashboard() {
           </div>
           <div className="card sd-small-card">
             <div className="sd-small-card-row">
-              <h4>Carrier Rating</h4>
+              <h4>{t(language, 'shipper.carrierRating', 'Carrier Rating')}</h4>
               <i className="fa-solid fa-star" aria-hidden="true" />
             </div>
             <div className="big">{statsLoading ? '...' : (dashboardStats?.rating || 0)}</div>
@@ -811,32 +815,32 @@ export default function ShipperDashboard() {
 
           <div className="card sd-small-card">
             <div className="sd-small-card-row">
-              <h4>Total Revenue</h4>
+              <h4>{t(language, 'shipper.totalRevenue', 'Total Revenue')}</h4>
               <i className="fa-solid fa-dollar-sign" aria-hidden="true" />
             </div>
             <div className="big">${statsLoading ? '...' : ((dashboardStats?.total_revenue || 0) / 1000).toFixed(0)}K</div>
-            <div className="small-sub-revenue">{dashboardStats?.revenue_change || '+0%'} MTD</div>
+            <div className="small-sub-revenue">{dashboardStats?.revenue_change || '+0%'} {t(language, 'shipper.mtd', 'MTD')}</div>
           </div>
           <div className="card sd-small-card">
             <div className="sd-small-card-row">
-              <h4>Compliance</h4>
+              <h4>{t(language, 'nav.compliance', 'Compliance')}</h4>
               <i className="fa-solid fa-shield-halved" aria-hidden="true" />
             </div>
             <div className="big">{statsLoading ? '...' : `${dashboardStats?.compliance_score || 0}%`}</div>
-            <div className="small-sub-compliance">{dashboardStats?.compliance_expiring || 0} expiring</div>
+            <div className="small-sub-compliance">{dashboardStats?.compliance_expiring || 0} {t(language, 'common.expiring', 'expiring')}</div>
           </div>
           <div className="card sd-small-card" style={{ cursor: 'pointer' }} onClick={() => setShowDraftLoadsModal(true)}>
             <div className="sd-small-card-row">
-              <h4>Draft Loads</h4>
+              <h4>{t(language, 'shipper.draftLoads', 'Draft Loads')}</h4>
               <i className="fa-solid fa-file-lines" aria-hidden="true" />
             </div>
             <div className="big">{statsLoading ? '...' : (dashboardStats?.draft_loads || 0)}</div>
-            <div className="small-sub-task">Click to manage</div>
+            <div className="small-sub-task">{t(language, 'common.clickToManage', 'Click to manage')}</div>
           </div>
 
           <div className="card sd-small-card shd-ai-summary">
-            <h4>AI Summary</h4>
-            <div className="big">{statsLoading ? '...' : (dashboardStats?.total_loads || 0)} loads</div>
+            <h4>{t(language, 'shipper.aiSummary', 'AI Summary')}</h4>
+            <div className="big">{statsLoading ? '...' : (dashboardStats?.total_loads || 0)} {t(language, 'common.loads', 'loads')}</div>
           </div>
         </section>
 
@@ -871,10 +875,10 @@ export default function ShipperDashboard() {
 
         <section className="fp-grid" style={{gridTemplateColumns:'repeat(3,1fr)',gap:18}}>
           <div className="card ai-insights">
-            <h3>AI Insights</h3>
+            <h3>{t(language, 'shipper.aiInsights', 'AI Insights')}</h3>
             <div className="insight">{shipperAiHeadline}</div>
             {shipperInsightsLoading && (
-              <div className="muted" style={{ marginTop: 8 }}>Loading insights...</div>
+              <div className="muted" style={{ marginTop: 8 }}>{t(language, 'dashboard.loadingInsights', 'Loading insights...')}</div>
             )}
             {shipperInsightsError && (
               <div className="muted" style={{ marginTop: 8, color: '#b42318' }}>{shipperInsightsError}</div>
@@ -897,7 +901,7 @@ export default function ShipperDashboard() {
 
           <div className="card active-loads">
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-              <h3>Active Loads</h3>
+              <h3>{t(language, 'dashboard.activeLoads', 'Active Loads')}</h3>
               <div className="muted">{activeCount} of {totalCount}</div>
             </div>
             <ul className="active-load-list">
@@ -907,11 +911,11 @@ export default function ShipperDashboard() {
                 </li>
               ) : homeLoadsLoading ? (
                 <li>
-                  <div className="muted">Loading shipments…</div>
+                  <div className="muted">{t(language, 'shipper.loadingShipments', 'Loading shipments…')}</div>
                 </li>
               ) : (activeLoads || []).length === 0 ? (
                 <li>
-                  <div className="muted">No active loads yet.</div>
+                  <div className="muted">{t(language, 'shipper.noActiveLoadsYet', 'No active loads yet.')}</div>
                 </li>
               ) : (
                 (activeLoads || []).slice(0, 3).map((l) => {
@@ -938,15 +942,15 @@ export default function ShipperDashboard() {
           </div>
 
           <div className="card top-carriers">
-            <h3>Top Carriers</h3>
+            <h3>{t(language, 'shipper.topCarriers', 'Top Carriers')}</h3>
             <ol className="top-carriers">
               {homeCarriersLoading ? (
                 <li>
-                  <div className="muted small">Loading carriers...</div>
+                  <div className="muted small">{t(language, 'shipper.loadingCarriers', 'Loading carriers...')}</div>
                 </li>
               ) : topCarrierRows.length === 0 ? (
                 <li>
-                  <div className="muted small">No carrier activity yet.</div>
+                  <div className="muted small">{t(language, 'shipper.noCarrierActivity', 'No carrier activity yet.')}</div>
                 </li>
               ) : topCarrierRows.map((carrier, index) => (
                 <li key={carrier.key || `${carrier.name}-${index}`}>
@@ -954,15 +958,15 @@ export default function ShipperDashboard() {
                     <div className="name">{carrier.name}</div>
                     <div className="sub muted small">
                       {carrier.completedLoads > 0 || carrier.activeLoads > 0
-                        ? `${carrier.completedLoads} completed • ${carrier.activeLoads} active`
-                        : `${carrier.activeRelationship ? 'Active relationship' : 'Connected'} • ${carrier.assignedLoads || carrier.totalLoads || 0} loads`}
+                        ? `${carrier.completedLoads} ${t(language, 'common.completed', 'completed')} • ${carrier.activeLoads} ${t(language, 'common.active', 'active')}`
+                        : `${carrier.activeRelationship ? t(language, 'shipper.activeRelationship', 'Active relationship') : t(language, 'common.connected', 'Connected')} • ${carrier.assignedLoads || carrier.totalLoads || 0} ${t(language, 'common.loads', 'loads')}`}
                     </div>
                   </div>
                   <div className="carrier-right">
                     <span className={`rating ${index === 1 ? 'blue' : index === 2 ? 'orange' : ''}`}>
-                      {carrier.rating > 0 ? `${carrier.rating.toFixed(1)}★` : 'No rating'}
+                      {carrier.rating > 0 ? `${carrier.rating.toFixed(1)}★` : t(language, 'shipper.noRating', 'No rating')}
                     </span>
-                    <div className="muted small">{carrier.assignedLoads || carrier.totalLoads || 0} loads</div>
+                    <div className="muted small">{carrier.assignedLoads || carrier.totalLoads || 0} {t(language, 'common.loads', 'loads')}</div>
                   </div>
                 </li>
               ))}
@@ -970,48 +974,48 @@ export default function ShipperDashboard() {
           </div>
 
           <div className="card performance-card">
-            <h3>Performance Health</h3>
+            <h3>{t(language, 'shipper.performanceHealth', 'Performance Health')}</h3>
             <div className="performance-metrics">
               <div className="metric">
-                <strong className="green">Coverage</strong>
+                <strong className="green">{t(language, 'shipper.coverage', 'Coverage')}</strong>
                 <div className="muted">{coverageRate}%</div>
               </div>
               <div className="metric">
-                <strong className="blue">Completion</strong>
+                <strong className="blue">{t(language, 'shipper.completion', 'Completion')}</strong>
                 <div className="muted">{completionRate}%</div>
               </div>
             </div>
             <div className="muted small" style={{ marginTop: 12 }}>
-              {totalCount} total loads • {activeCarrierCount} active carriers • Avg rating {averageCarrierRating}★
+              {totalCount} {t(language, 'shipper.totalLoads', 'total loads')} • {activeCarrierCount} {t(language, 'shipper.activeCarriersLabel', 'active carriers')} • {t(language, 'shipper.avgRating', 'Avg rating')} {averageCarrierRating}★
             </div>
           </div>
 
           <div className="card compliance-card">
-            <h3>Compliance Status</h3>
+            <h3>{t(language, 'shipper.complianceStatus', 'Compliance Status')}</h3>
             {homeComplianceLoading ? (
               <div className="sd-exp-item pill">
-                <div className="exp-title">Loading compliance...</div>
+                <div className="exp-title">{t(language, 'shipper.loadingCompliance', 'Loading compliance...')}</div>
               </div>
             ) : (
               <>
                 <div className="sd-exp-item pill">
-                  <div className="exp-title">Compliance score: {complianceScore}%</div>
-                  <div className="exp-sub muted">{complianceTone} • {complianceDocuments.length} documents on file</div>
+                  <div className="exp-title">{t(language, 'shipper.complianceScore', 'Compliance score:')} {complianceScore}%</div>
+                  <div className="exp-sub muted">{complianceTone} • {complianceDocuments.length} {t(language, 'shipper.documentsOnFile', 'documents on file')}</div>
                 </div>
                 {expiringComplianceItems.length > 0 ? expiringComplianceItems.map((doc, index) => (
                   <div className="sd-exp-item pill" key={`compliance-doc-${doc?.id || index}`}>
                     <div className="exp-title">{String(doc?.document_type || 'Document')} {String(doc?.status || '').trim()}</div>
-                    <div className="exp-sub muted">{doc?.expiry_date ? `Expiry: ${doc.expiry_date}` : 'Review required'}</div>
+                    <div className="exp-sub muted">{doc?.expiry_date ? `${t(language, 'common.expiry', 'Expiry:')} ${doc.expiry_date}` : t(language, 'shipper.reviewRequired', 'Review required')}</div>
                   </div>
                 )) : complianceWarnings.slice(0, 1).map((warning, index) => (
                   <div className="sd-exp-item pill" key={`compliance-warning-${index}`}>
-                    <div className="exp-title">Compliance alert</div>
+                    <div className="exp-title">{t(language, 'shipper.complianceAlert', 'Compliance alert')}</div>
                     <div className="exp-sub muted">{warning}</div>
                   </div>
                 ))}
                 {expiringComplianceItems.length === 0 && complianceWarnings.length === 0 && complianceRecommendations.slice(0, 1).map((recommendation, index) => (
                   <div className="sd-exp-item pill" key={`compliance-recommendation-${index}`}>
-                    <div className="exp-title">Next action</div>
+                    <div className="exp-title">{t(language, 'shipper.nextAction', 'Next action')}</div>
                     <div className="exp-sub muted">{recommendation}</div>
                   </div>
                 ))}
@@ -1044,7 +1048,7 @@ export default function ShipperDashboard() {
       <div>
         <header className="fp-header">
           <div className="fp-header-titles">
-            <h2>{navGroups.flatMap(g => g.items).find(i => i.key === activeNav)?.label || 'View'}</h2>
+            <h2>{navGroups.flatMap(g => g.items).find(i => i.key === activeNav)?.label || t(language, 'common.view', 'View')}</h2>
             <p className="fp-subtitle">This is the {activeNav} view.</p>
           </div>
         </header>
@@ -1063,7 +1067,7 @@ export default function ShipperDashboard() {
       <div className="fp-topbar">
         <div className="topbar-row topbar-row-1">
           <div className="topbar-left">
-            <button className="hamburger" aria-label="Open sidebar" onClick={() => setIsSidebarOpen(true)}>
+            <button className="hamburger" aria-label={t(language, 'dashboard.openSidebar', 'Open sidebar')} onClick={() => setIsSidebarOpen(true)}>
               <i className="fa-solid fa-bars" />
             </button>
             <div className="brand-block">
@@ -1079,8 +1083,8 @@ export default function ShipperDashboard() {
                     <div className="company-name">Atlas Logistics LLC</div>
                     {/* Shipper-only status chips placed below the company name (column) */}
                     <div className="shipper-status">
-                      <span className="int-status-badge active"><i className="fa-solid fa-check"/> Active & Operating</span>
-                      <span className="int-status-badge blue"><i className="fa-solid fa-network-wired"/> TMS Connected</span>
+                      <span className="int-status-badge active"><i className="fa-solid fa-check"/> {t(language, 'dashboard.activeOperating', 'Active & Operating')}</span>
+                      <span className="int-status-badge blue"><i className="fa-solid fa-network-wired"/> {t(language, 'dashboard.tmsConnected', 'TMS Connected')}</span>
                     </div>
                   </div>
                 </div>
@@ -1121,7 +1125,7 @@ export default function ShipperDashboard() {
                     }}
                   >
                     <div style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div style={{ fontWeight: 800, color: isDarkMode ? '#e2e8f0' : '#0f172a' }}>Notifications</div>
+                      <div style={{ fontWeight: 800, color: isDarkMode ? '#e2e8f0' : '#0f172a' }}>{t(language, 'common.notifications', 'Notifications')}</div>
                       <button
                         type="button"
                         className="btn small ghost-cd"
@@ -1130,13 +1134,13 @@ export default function ShipperDashboard() {
                         }}
                         disabled={notifLoading}
                       >
-                        {notifLoading ? 'Loading…' : 'Refresh'}
+                        {notifLoading ? t(language, 'common.loading', 'Loading…') : t(language, 'common.refresh', 'Refresh')}
                       </button>
                     </div>
                     <div style={{ maxHeight: 420, overflowY: 'auto' }}>
                       {(notifItems || []).length === 0 ? (
                         <div style={{ padding: 14, color: isDarkMode ? '#94a3b8' : '#64748b', fontSize: 13 }}>
-                          {notifLoading ? 'Loading…' : 'No notifications yet.'}
+                          {notifLoading ? t(language, 'common.loading', 'Loading…') : t(language, 'dashboard.noNotificationsYet', 'No notifications yet.')}
                         </div>
                       ) : (
                         (notifItems || []).map((n) => {
@@ -1173,7 +1177,7 @@ export default function ShipperDashboard() {
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
                                   {hasAction ? (
                                     <button type="button" className="btn small ghost-cd" onClick={() => handleNotifAction(n)}>
-                                      View
+                                      {t(language, 'common.view', 'View')}
                                     </button>
                                   ) : null}
                                   {!isRead && (
@@ -1182,7 +1186,7 @@ export default function ShipperDashboard() {
                                       className="btn small ghost-cd"
                                       onClick={() => markNotificationRead(String(n?.id || '').trim())}
                                     >
-                                      Mark read
+                                      {t(language, 'dashboard.markRead', 'Mark read')}
                                     </button>
                                   )}
                                 </div>
@@ -1230,8 +1234,8 @@ export default function ShipperDashboard() {
             </div>
             <div className="chips sidebar-chips">
               <div className="company-name">Atlas Logistics LLC</div>
-              <span className="int-status-badge active">Active & Operating</span>
-              <span className="int-status-badge blue">TMS Connected</span>
+              <span className="int-status-badge active">{t(language, 'dashboard.activeOperating', 'Active & Operating')}</span>
+              <span className="int-status-badge blue">{t(language, 'dashboard.tmsConnected', 'TMS Connected')}</span>
             </div>
           </div>
 
@@ -1261,18 +1265,18 @@ export default function ShipperDashboard() {
           </nav>
 
           <div className="sidebar-dark-control">
-            <span className="dark-label">Dark Mode</span>
+            <span className="dark-label">{t(language, 'dashboard.darkMode', 'Dark Mode')}</span>
             <button
               className="dark-toggle"
               aria-pressed={isDarkMode}
-              aria-label="Toggle dark mode"
+              aria-label={t(language, 'dashboard.toggleDarkMode', 'Toggle dark mode')}
               onClick={() => setIsDarkMode((s) => !s)}
             >
               <span className="dark-toggle-knob" />
             </button>
           </div>
 
-          <button className="sidebar-close" aria-label="Close sidebar" onClick={() => setIsSidebarOpen(false)}>
+          <button className="sidebar-close" aria-label={t(language, 'dashboard.closeSidebar', 'Close sidebar')} onClick={() => setIsSidebarOpen(false)}>
             <i className="fa-solid fa-xmark" />
           </button>
         </aside>
