@@ -4,10 +4,13 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useUserSettings } from '../../contexts/UserSettingsContext';
 import { API_URL } from '../../config';
 import { downloadCsv } from '../../utils/fileDownload';
+import { LANGUAGE_OPTIONS, t } from '../../i18n/translate';
 
 export default function Settings() {
   const { currentUser } = useAuth();
-  const { settings: userSettings, patchSettings } = useUserSettings();
+  const { settings: userSettings, patchSettings, setSettings: setUserSettings } = useUserSettings();
+  const language = userSettings?.language || 'English';
+  const tr = (key, fallback) => t(language, key, fallback);
   const [activeTab, setActiveTab] = useState('company-profile');
   const [userSearchTerm, setUserSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('All Status');
@@ -70,14 +73,40 @@ export default function Settings() {
   };
 
   const updatePrefs = async (partial) => {
+    const before = userSettings;
     try {
       setPrefsMessage({ type: '', text: '' });
       setPrefBusy(true);
+
+      // Optimistic UI update so selects/toggles don't snap back while the API call is in-flight.
+      setUserSettings((prev) => {
+        const safePrev = prev || {};
+        const next = { ...safePrev, ...(partial || {}) };
+
+        // Preserve nested structures when a partial update includes sub-objects.
+        if (partial?.notification_preferences && typeof partial.notification_preferences === 'object') {
+          next.notification_preferences = {
+            ...(safePrev.notification_preferences || {}),
+            ...partial.notification_preferences,
+          };
+        }
+
+        if (partial?.notification_channels && typeof partial.notification_channels === 'object') {
+          next.notification_channels = {
+            ...(safePrev.notification_channels || {}),
+            ...partial.notification_channels,
+          };
+        }
+
+        return next;
+      });
+
       await patchSettings(partial, { requestLabel: 'PATCH /auth/settings (carrier preferences)' });
-      setPrefsMessage({ type: 'success', text: 'Preferences saved.' });
+      setPrefsMessage({ type: 'success', text: tr('carrierSettings.preferences.saved', 'Preferences saved.') });
     } catch (e) {
       console.error(e);
-      setPrefsMessage({ type: 'error', text: e?.message || 'Failed to save preferences' });
+      if (before) setUserSettings(before);
+      setPrefsMessage({ type: 'error', text: e?.message || tr('carrierSettings.preferences.saveFailed', 'Failed to save preferences') });
     } finally {
       setPrefBusy(false);
     }
@@ -443,7 +472,7 @@ export default function Settings() {
       setMessage({ type: 'error', text: err?.message || 'Failed to upload logo' });
     } finally {
       setUploadingLogo(false);
-      try { e.target.value = ''; } catch {}
+      try { e.target.value = ''; } catch (err) { void err; }
     }
   };
 
@@ -1617,29 +1646,29 @@ export default function Settings() {
 
             {/* Language & Localization */}
             <div className="preferences-card">
-              <h3> Language & Localization</h3>
-              <p>Configure language and localization settings</p>
+              <h3>{tr('carrierSettings.localization.title', 'Language & Localization')}</h3>
+              <p>{tr('carrierSettings.localization.subtitle', 'Configure language and localization settings')}</p>
               
               <div className="locale-setting">
                 <div className="locale-row">
                   <div className="locale-label">
-                    <label>Default Language</label>
+                    <label>{tr('carrierSettings.localization.defaultLanguage', 'Default Language')}</label>
                   </div>
                   <div className="locale-select">
                     <select
                       value={prefVal('language', 'English')}
                       onChange={(e) => updatePrefs({ language: e.target.value })}
                     >
-                      <option>English</option>
-                      <option>Spanish</option>
-                      <option>Arabic</option>
+                      {LANGUAGE_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
                     </select>
                   </div>
                 </div>
 
                 <div className="locale-row">
                   <div className="locale-label">
-                    <label>Date Format</label>
+                    <label>{tr('carrierSettings.localization.dateFormat', 'Date Format')}</label>
                   </div>
                   <div className="locale-select">
                     <select

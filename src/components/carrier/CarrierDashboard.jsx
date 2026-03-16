@@ -31,6 +31,7 @@ export default function CarrierDashboard() {
   const { currentUser, logout } = useAuth();
   const { settings } = useUserSettings();
   const language = settings?.language || 'English';
+  const locale = language === 'Spanish' ? 'es-ES' : language === 'Arabic' ? 'ar' : 'en-US';
   const languageCode = language === 'Spanish' ? 'ES' : language === 'Arabic' ? 'AR' : 'EN';
   const navigate = useNavigate();
   const location = useLocation();
@@ -38,7 +39,7 @@ export default function CarrierDashboard() {
   // Dashboard stats state
   const [activeLoads, setActiveLoads] = useState({ inProgress: 0, delivered: 0, completed: 0 });
   const [driversCompliance, setDriversCompliance] = useState({ active: 0, expiring: 0, alerts: 0 });
-  const [earnings, setEarnings] = useState({ week: '$0', month: '$0', factoring: '$0' });
+  const [earnings, setEarnings] = useState({ week: 0, month: 0, factoring: 0 });
   const [expiringDocuments, setExpiringDocuments] = useState([]);
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [marketplaceLoads, setMarketplaceLoads] = useState([]);
@@ -55,6 +56,15 @@ export default function CarrierDashboard() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarDark, setIsSidebarDark] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
+
+  const fmtMoney = (amt) => {
+    const n = Number(amt || 0);
+    try {
+      return new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' }).format(n);
+    } catch {
+      return `$${n.toFixed(2)}`;
+    }
+  };
 
   // Messaging unread badge
   const [messagingUnread, setMessagingUnread] = useState(0);
@@ -128,11 +138,6 @@ export default function CarrierDashboard() {
           return { column: 'tendered', statusFlag: 'assigned' };
         }
         return { column: 'tendered', statusFlag: 'unassigned' };
-      };
-
-      const fmtMoney = (amt) => {
-        const n = Number(amt || 0);
-        return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
       };
       
       try {
@@ -289,9 +294,9 @@ export default function CarrierDashboard() {
               .reduce((sum, inv) => sum + paidAmount(inv), 0);
 
             setEarnings({
-              week: fmtMoney(weekTotal),
-              month: fmtMoney(monthTotal),
-              factoring: fmtMoney(factoringTotal),
+              week: weekTotal,
+              month: monthTotal,
+              factoring: factoringTotal,
             });
           }
         } catch (error) {
@@ -729,7 +734,7 @@ export default function CarrierDashboard() {
 
   const handleSubmitReportFraud = async () => {
     if (!reportFraudData.message.trim()) {
-      alert('Please enter a message');
+      alert(t(language, 'dashboard.errors.enterMessage', 'Please enter a message'));
       return;
     }
 
@@ -751,16 +756,16 @@ export default function CarrierDashboard() {
       });
 
       if (response.ok) {
-        alert('Fraud report submitted successfully!');
+        alert(t(language, 'dashboard.reportFraudSuccess', 'Fraud report submitted successfully!'));
         setReportFraudData({ subject: '', message: '' });
         setShowReportFraudModal(false);
       } else {
         const error = await response.json();
-        alert(`Error: ${error.detail || 'Failed to submit fraud report'}`);
+        alert(`${t(language, 'common.errorPrefix', 'Error:')} ${error.detail || t(language, 'dashboard.reportFraudFailed', 'Failed to submit fraud report')}`);
       }
     } catch (error) {
       console.error('Error submitting fraud report:', error);
-      alert('Failed to submit fraud report. Please try again.');
+      alert(t(language, 'dashboard.reportFraudFailedTryAgain', 'Failed to submit fraud report. Please try again.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -775,7 +780,7 @@ export default function CarrierDashboard() {
 
   const handleSubmitSuggestEdit = async () => {
     if (!suggestEditData.message.trim()) {
-      alert('Please enter a suggestion');
+      alert(t(language, 'dashboard.errors.enterSuggestion', 'Please enter a suggestion'));
       return;
     }
 
@@ -797,16 +802,16 @@ export default function CarrierDashboard() {
       });
 
       if (response.ok) {
-        alert('Edit suggestion submitted successfully!');
+        alert(t(language, 'dashboard.suggestEditSuccess', 'Edit suggestion submitted successfully!'));
         setSuggestEditData({ subject: '', message: '' });
         setShowSuggestEditModal(false);
       } else {
         const error = await response.json();
-        alert(`Error: ${error.detail || 'Failed to submit edit suggestion'}`);
+        alert(`${t(language, 'common.errorPrefix', 'Error:')} ${error.detail || t(language, 'dashboard.suggestEditFailed', 'Failed to submit edit suggestion')}`);
       }
     } catch (error) {
       console.error('Error submitting edit suggestion:', error);
-      alert('Failed to submit edit suggestion. Please try again.');
+      alert(t(language, 'dashboard.suggestEditFailedTryAgain', 'Failed to submit edit suggestion. Please try again.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -827,16 +832,16 @@ export default function CarrierDashboard() {
     const fallbackCarrierAiSuggestions = [
       {
         id: 'fallback_compliance',
-        title: 'Compliance Renewal',
-        detail: 'Review expiring carrier documents to avoid operational risk.',
-        action_label: 'Open Compliance',
+        title: t(language, 'dashboard.aiFallback.compliance.title', 'Compliance Renewal'),
+        detail: t(language, 'dashboard.aiFallback.compliance.detail', 'Review expiring carrier documents to avoid operational risk.'),
+        action_label: t(language, 'dashboard.aiFallback.compliance.action', 'Open Compliance'),
         action_target: 'compliance',
       },
       {
         id: 'fallback_marketplace',
-        title: 'Load Opportunity',
-        detail: 'Review marketplace opportunities and assign drivers for active lanes.',
-        action_label: 'Open Marketplace',
+        title: t(language, 'dashboard.aiFallback.marketplace.title', 'Load Opportunity'),
+        detail: t(language, 'dashboard.aiFallback.marketplace.detail', 'Review marketplace opportunities and assign drivers for active lanes.'),
+        action_label: t(language, 'dashboard.aiFallback.marketplace.action', 'Open Marketplace'),
         action_target: 'marketplace',
       },
     ];
@@ -861,39 +866,39 @@ export default function CarrierDashboard() {
                 <h3><i className="fa-solid fa-building" style={{ marginRight: '8px' }}></i>{t(language, 'dashboard.companyProfile', 'Company Profile')}</h3>
                 {complianceScore !== null && (
                   <div className="pill" style={{ background:'#e0f2fe', color:'#075985', padding:'6px 10px', borderRadius:'999px', fontWeight:600 }}>
-                    Compliance Score: {Math.round(complianceScore)}%
+                    {t(language, 'dashboard.complianceScoreLabel', 'Compliance Score:')} {Math.round(complianceScore)}%
                   </div>
                 )}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginTop: '16px' }}>
                 {companyProfile.data.companyName && (
-                  <div><strong>Company:</strong> {companyProfile.data.companyName}</div>
+                  <div><strong>{t(language, 'carrier.profile.companyLabel', 'Company:')}</strong> {companyProfile.data.companyName}</div>
                 )}
                 {companyProfile.data.dotNumber && (
-                  <div><strong>DOT Number:</strong> {companyProfile.data.dotNumber}</div>
+                  <div><strong>{t(language, 'carrier.profile.dotNumberLabel', 'DOT Number:')}</strong> {companyProfile.data.dotNumber}</div>
                 )}
                 {companyProfile.data.mcNumber && (
-                  <div><strong>MC Number:</strong> {companyProfile.data.mcNumber}</div>
+                  <div><strong>{t(language, 'carrier.profile.mcNumberLabel', 'MC Number:')}</strong> {companyProfile.data.mcNumber}</div>
                 )}
                 {companyProfile.data.contactEmail && (
-                  <div><strong>Contact:</strong> {companyProfile.data.contactEmail}</div>
+                  <div><strong>{t(language, 'carrier.profile.contactLabel', 'Contact:')}</strong> {companyProfile.data.contactEmail}</div>
                 )}
                 {companyProfile.data.fleetSize && (
-                  <div><strong>Fleet Size:</strong> {companyProfile.data.fleetSize} units</div>
+                  <div><strong>{t(language, 'carrier.profile.fleetSizeLabel', 'Fleet Size:')}</strong> {companyProfile.data.fleetSize} {t(language, 'carrier.profile.units', 'units')}</div>
                 )}
                 {companyProfile.data.homeTerminal && (
-                  <div><strong>Home Terminal:</strong> {companyProfile.data.homeTerminal}</div>
+                  <div><strong>{t(language, 'carrier.profile.homeTerminalLabel', 'Home Terminal:')}</strong> {companyProfile.data.homeTerminal}</div>
                 )}
               </div>
               {!companyProfile.onboarding_completed && (
                 <div style={{ marginTop: '16px', padding: '12px', background: '#fef3c7', borderRadius: '8px', color: '#92400e' }}>
                   <i className="fa-solid fa-exclamation-triangle" style={{ marginRight: '8px' }}></i>
-                  Onboarding not complete.{' '}
+                  {t(language, 'carrier.onboardingNotComplete', 'Onboarding not complete.')}{' '}
                   <span 
                     onClick={() => setActiveNav('settings')}
                     style={{ color: '#1d4ed8', textDecoration: 'underline', cursor: 'pointer' }}
                   >
-                    Complete now
+                    {t(language, 'carrier.completeNow', 'Complete now')}
                   </span>
                 </div>
               )}
@@ -970,7 +975,7 @@ export default function CarrierDashboard() {
                     style={{ marginTop: 6 }}
                     onClick={() => runCarrierInsightAction(s.action_target)}
                   >
-                    {s.action_label}
+                    {s.action_label || t(language, 'common.open', 'Open')}
                   </button>
                 </li>
               ))}
@@ -983,9 +988,9 @@ export default function CarrierDashboard() {
               <i className="fa-solid fa-dollar-sign cd-card-icon small" aria-hidden="true" />
             </div>
             <div className="stats earnings-stats">
-              <div>{t(language, 'dashboard.thisWeek', 'This Week')} <span className="green">{dashboardLoading ? '...' : earnings.week}</span></div>
-              <div>{t(language, 'dashboard.thisMonth', 'This Month')} <span className="green">{dashboardLoading ? '...' : earnings.month}</span></div>
-              <div>{t(language, 'dashboard.factoringFunded', 'Factoring Funded')} <span className="blue">{dashboardLoading ? '...' : earnings.factoring}</span></div>
+              <div>{t(language, 'dashboard.thisWeekTitle', 'This Week')} <span className="green">{dashboardLoading ? '...' : fmtMoney(earnings.week)}</span></div>
+              <div>{t(language, 'dashboard.thisMonthTitle', 'This Month')} <span className="green">{dashboardLoading ? '...' : fmtMoney(earnings.month)}</span></div>
+              <div>{t(language, 'dashboard.factoringFunded', 'Factoring Funded')} <span className="blue">{dashboardLoading ? '...' : fmtMoney(earnings.factoring)}</span></div>
             </div>
           </div>
 
@@ -1013,24 +1018,28 @@ export default function CarrierDashboard() {
                   <div className="muted">{t(language, 'common.loading', 'Loading…')}</div>
                 </li>
               ) : (recentUnreadThreads || []).length > 0 ? (
-                (recentUnreadThreads || []).map((t) => {
-                  const title = t.display_title || t.other_display_name || t.title || 'Conversation';
-                  const preview = (t.last_message && t.last_message.text) ? t.last_message.text : 'Unread message';
-                  const ts = Number(t.last_message_at || t.updated_at || 0);
-                  const timeLabel = ts ? new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-                  const roleLabel = String(t.kind || '').includes('shipper') ? '- Shipper' : String(t.kind || '').includes('driver') ? '- Driver' : '';
+                (recentUnreadThreads || []).map((thread) => {
+                  const title = thread.display_title || thread.other_display_name || thread.title || t(language, 'messaging.conversation', 'Conversation');
+                  const preview = (thread.last_message && thread.last_message.text) ? thread.last_message.text : t(language, 'messaging.unreadMessage', 'Unread message');
+                  const ts = Number(thread.last_message_at || thread.updated_at || 0);
+                  const timeLabel = ts ? new Date(ts * 1000).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }) : '';
+                  const roleLabel = String(thread.kind || '').includes('shipper')
+                    ? `- ${t(language, 'roles.shipper', 'Shipper')}`
+                    : String(thread.kind || '').includes('driver')
+                      ? `- ${t(language, 'roles.driver', 'Driver')}`
+                      : '';
 
                   return (
                     <li
-                      key={t.id}
+                      key={thread.id}
                       className="msg-item"
                       role="button"
                       tabIndex={0}
-                      onClick={() => { setInitialThreadId(t.id); setActiveNav('messaging'); }}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setInitialThreadId(t.id); setActiveNav('messaging'); } }}
+                      onClick={() => { setInitialThreadId(thread.id); setActiveNav('messaging'); }}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setInitialThreadId(thread.id); setActiveNav('messaging'); } }}
                       style={{ cursor: 'pointer' }}
                     >
-                      <img className="msg-avatar" src={peopleIcon} alt="chat" />
+                      <img className="msg-avatar" src={peopleIcon} alt={t(language, 'messaging.chatAlt', 'chat')} />
                       <div className="msg-body">
                         <div className="msg-head">
                           <strong>{title}</strong> {roleLabel ? <span className="role">{roleLabel}</span> : null}
@@ -1074,10 +1083,10 @@ export default function CarrierDashboard() {
                   <div style={{ padding: '16px', textAlign: 'center', color: '#6b7280' }}>{t(language, 'common.loading', 'Loading…')}</div>
                 ) : marketplaceLoads.length > 0 ? (
                   marketplaceLoads.map((load, index) => {
-                    const origin = typeof load.origin === 'string' ? load.origin : (load.origin?.city ? `${load.origin.city}, ${load.origin.state}` : 'Origin');
-                    const destination = typeof load.destination === 'string' ? load.destination : (load.destination?.city ? `${load.destination.city}, ${load.destination.state}` : 'Destination');
+                    const origin = typeof load.origin === 'string' ? load.origin : (load.origin?.city ? `${load.origin.city}, ${load.origin.state}` : t(language, 'loads.origin', 'Origin'));
+                    const destination = typeof load.destination === 'string' ? load.destination : (load.destination?.city ? `${load.destination.city}, ${load.destination.state}` : t(language, 'loads.destination', 'Destination'));
                     const rate = load.total_rate || load.linehaul_rate || load.rate || 0;
-                    const pickupDate = load.pickup_date || 'TBD';
+                    const pickupDate = load.pickup_date || t(language, 'common.tbd', 'TBD');
                     
                     return (
                       <div 
@@ -1093,7 +1102,7 @@ export default function CarrierDashboard() {
                           <div className="load-sub muted">{load.load_id || t(language, 'dashboard.load', 'Load')}</div>
                         </div>
                         <div className="load-right">
-                          <div className="price green">${rate}</div>
+                          <div className="price green">{fmtMoney(rate)}</div>
                           <div className="pickup muted">{t(language, 'dashboard.pickup', 'Pickup')}: {pickupDate}</div>
                         </div>
                       </div>
@@ -1115,7 +1124,7 @@ export default function CarrierDashboard() {
                 <h4 className="col-title">{t(language, 'dashboard.serviceOffers', 'Service Offers')}</h4>
                 <div className="offer-item">
                   <div className="offer-left">{t(language, 'dashboard.fuelDiscount', 'Fuel Discount')}<div className="muted">{t(language, 'dashboard.saveFuel500', 'Save on fuel at 500+ locations')}</div></div>
-                  <div className="offer-right"><span className="int-status-badge active">15% OFF</span></div>
+                  <div className="offer-right"><span className="int-status-badge active">15% {t(language, 'common.off', 'OFF')}</span></div>
                 </div>
                 <div className="offer-item">
                   <div className="offer-left">{t(language, 'dashboard.factoringRate', 'Factoring Rate')}<div className="muted">{t(language, 'dashboard.specialRateNewClients', 'Special rate for new clients')}</div></div>
@@ -1156,10 +1165,10 @@ export default function CarrierDashboard() {
                         <span className={`dot ${dotColor}`} style={{ opacity: notif.is_read ? 0.5 : 1 }} />
                       </div>
                       <div className="note-body">
-                        <div className="note-title">{notif.title || 'Notification'}</div>
+                        <div className="note-title">{notif.title || t(language, 'dashboard.notification', 'Notification')}</div>
                         <div className="note-sub muted">{notif.message || ''}</div>
                       </div>
-                      <div className="note-time">{notif.relative_time || notif.formatted_time || 'Recently'}</div>
+                      <div className="note-time">{notif.relative_time || notif.formatted_time || t(language, 'dashboard.recently', 'Recently')}</div>
                     </li>
                   );
                 })
@@ -1212,14 +1221,14 @@ export default function CarrierDashboard() {
             <header className="fp-header">
               <div className="fp-header-titles">
                 <h2>{navGroups.flatMap(g => g.items).find(i => i.key === activeNav)?.label || t(language, 'common.view', 'View')}</h2>
-                <p className="fp-subtitle">This is the {activeNav} view. Only the inner area changes.</p>
+                <p className="fp-subtitle">{t(language, 'dashboard.placeholder.subtitlePrefix', 'This is the')} {activeNav} {t(language, 'dashboard.placeholder.subtitleSuffix', 'view. Only the inner area changes.')}</p>
               </div>
             </header>
             <section className="fp-grid">
               <div className="card">
-                <div className="card-header"><h3>Placeholder</h3></div>
+                <div className="card-header"><h3>{t(language, 'dashboard.placeholder.title', 'Placeholder')}</h3></div>
                 <div style={{ padding: 20 }}>
-                  <p>Content for <strong>{activeNav}</strong> goes here. Replace this with real components as needed.</p>
+                  <p>{t(language, 'dashboard.placeholder.bodyPrefix', 'Content for')} <strong>{activeNav}</strong> {t(language, 'dashboard.placeholder.bodySuffix', 'goes here. Replace this with real components as needed.')}</p>
                 </div>
               </div>
             </section>
@@ -1246,9 +1255,9 @@ export default function CarrierDashboard() {
                 </div>
                 {/* verified moved into sidebar header; topbar inline chips removed */}
                 <div className="ids">
-                  <span className="id-pair"><span className="id-label">DOT:</span> <span className="id-value">{dotNumber || 'N/A'}</span></span>
+                  <span className="id-pair"><span className="id-label">{t(language, 'carrier.dot', 'DOT')}:</span> <span className="id-value">{dotNumber || t(language, 'common.na', 'N/A')}</span></span>
                   <span className="ids-sep">•</span>
-                  <span className="id-pair"><span className="id-label">MC:</span> <span className="id-value">{mcNumber || 'N/A'}</span></span>
+                  <span className="id-pair"><span className="id-label">{t(language, 'carrier.mc', 'MC')}:</span> <span className="id-value">{mcNumber || t(language, 'common.na', 'N/A')}</span></span>
                 </div>
               </div>
             </div>
@@ -1265,7 +1274,7 @@ export default function CarrierDashboard() {
               <div
                 className="notif"
                 role="button"
-                aria-label="Open Alerts & Notifications"
+                aria-label={t(language, 'alerts.open', 'Open Alerts & Notifications')}
                 onClick={() => { setActiveNav('alerts'); setIsSidebarOpen(false); }}
               >
                 <i className="fa-regular fa-bell notif-icon" aria-hidden="true" />
@@ -1275,7 +1284,7 @@ export default function CarrierDashboard() {
                 className="fa-solid fa-robot bot-icon"
                 aria-hidden="true"
                 role="button"
-                aria-label="Open Help Hub"
+                aria-label={t(language, 'help.open', 'Open Help Hub')}
                 onClick={() => { setActiveNav('help'); setIsSidebarOpen(false); }}
               />
               <img
@@ -1283,7 +1292,7 @@ export default function CarrierDashboard() {
                 alt="avatar"
                 className="avatar-img"
                 role="button"
-                aria-label="Open Settings"
+                aria-label={t(language, 'settings.open', 'Open Settings')}
                 onClick={() => { setActiveNav('settings'); setIsSidebarOpen(false); }}
               />
             </div>
@@ -1313,7 +1322,7 @@ export default function CarrierDashboard() {
                 id="fp-notif-dropdown-root-2"
                 style={{ position: 'relative' }}
                 role="button"
-                aria-label="Open Alerts & Notifications"
+                aria-label={t(language, 'alerts.open', 'Open Alerts & Notifications')}
               >
                 <button
                   type="button"
@@ -1322,7 +1331,7 @@ export default function CarrierDashboard() {
                     setActiveNav('alerts');
                     setIsSidebarOpen(false);
                   }}
-                  aria-label="Open Alerts & Notifications"
+                  aria-label={t(language, 'alerts.open', 'Open Alerts & Notifications')}
                   style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}
                 >
                   <i className="fa-regular fa-bell notif-icon" aria-hidden="true" />
@@ -1333,7 +1342,7 @@ export default function CarrierDashboard() {
                 className="fa-solid fa-robot bot-icon"
                 aria-hidden="true"
                 role="button"
-                aria-label="Open Help Hub"
+                aria-label={t(language, 'help.open', 'Open Help Hub')}
                 onClick={() => { setActiveNav('help'); setIsSidebarOpen(false); }}
               />
               <img
@@ -1341,7 +1350,7 @@ export default function CarrierDashboard() {
                 alt="avatar"
                 className="avatar-img"
                 role="button"
-                aria-label="Open Settings"
+                aria-label={t(language, 'settings.open', 'Open Settings')}
                 onClick={() => { setActiveNav('settings'); setIsSidebarOpen(false); }}
               />
             </div>
@@ -1357,8 +1366,8 @@ export default function CarrierDashboard() {
           </div>
           {/* DOT / MC line for mobile drawer */}
           <div className="ids mobile-ids">
-            <div className="mobile-id-line"><span className="id-pair"><span className="id-label">DOT:</span> <span className="id-value">{dotNumber || 'N/A'}</span></span></div>
-            <div className="mobile-id-line"><span className="id-pair"><span className="id-label">MC:</span> <span className="id-value">{mcNumber || 'N/A'}</span></span></div>
+            <div className="mobile-id-line"><span className="id-pair"><span className="id-label">{t(language, 'carrier.dot', 'DOT')}:</span> <span className="id-value">{dotNumber || t(language, 'common.na', 'N/A')}</span></span></div>
+            <div className="mobile-id-line"><span className="id-pair"><span className="id-label">{t(language, 'carrier.mc', 'MC')}:</span> <span className="id-value">{mcNumber || t(language, 'common.na', 'N/A')}</span></span></div>
           </div>
           <div className="chips sidebar-chips">
             <span className="chip-cd success">{t(language, 'carrier.dot', 'DOT')} {dotStatusText}{fmcsaLoading ? '…' : ''}</span>

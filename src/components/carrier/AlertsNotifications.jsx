@@ -2,14 +2,40 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { API_URL } from '../../config';
+import { useTr } from '../../i18n/useTr';
 import '../../styles/carrier/AlertsNotifications.css';
 
 const AlertsNotifications = () => {
   const { currentUser } = useAuth();
-  const [activeTab, setActiveTab] = useState('Notification Center');
+  const { tr } = useTr();
+
+  const TABS = {
+    center: 'center',
+    settings: 'settings',
+  };
+
+  const CATEGORY_OPTIONS = [
+    { value: 'all', labelKey: 'alerts.filters.allCategories', labelFallback: 'All Categories' },
+    { value: 'compliance', labelKey: 'alerts.category.compliance', labelFallback: 'Compliance' },
+    { value: 'loads', labelKey: 'alerts.category.loads', labelFallback: 'Loads' },
+    { value: 'finance', labelKey: 'alerts.category.finance', labelFallback: 'Finance' },
+    { value: 'driver_dispatch', labelKey: 'alerts.category.driverDispatch', labelFallback: 'Driver/Dispatch' },
+    { value: 'system', labelKey: 'alerts.category.system', labelFallback: 'System' },
+    { value: 'partnership', labelKey: 'alerts.category.partnership', labelFallback: 'Partnership' },
+  ];
+
+  const STATUS_OPTIONS = [
+    { value: 'all', labelKey: 'alerts.filters.allStatus', labelFallback: 'All Status' },
+    { value: 'unread', labelKey: 'alerts.filters.unread', labelFallback: 'Unread' },
+    { value: 'read', labelKey: 'alerts.filters.read', labelFallback: 'Read' },
+    { value: 'critical', labelKey: 'alerts.priority.critical', labelFallback: 'Critical' },
+    { value: 'warning', labelKey: 'alerts.priority.warning', labelFallback: 'Warning' },
+  ];
+
+  const [activeTab, setActiveTab] = useState(TABS.center);
   const [searchTerm, setSearchTerm] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('All Categories');
-  const [statusFilter, setStatusFilter] = useState('All Status');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -49,20 +75,20 @@ const AlertsNotifications = () => {
 
   // Fetch notifications from API
   useEffect(() => {
-    if (currentUser && activeTab === 'Notification Center') {
+    if (currentUser && activeTab === TABS.center) {
       fetchNotifications();
     }
   }, [currentUser, activeTab]);
 
   useEffect(() => {
-    if (currentUser && activeTab === 'Settings') {
+    if (currentUser && activeTab === TABS.settings) {
       fetchAlertSettings();
     }
   }, [currentUser, activeTab]);
 
   useEffect(() => {
     if (!settingsLoaded) return;
-    if (activeTab !== 'Settings') return;
+    if (activeTab !== TABS.settings) return;
     if (skipAutoSaveRef.current) {
       skipAutoSaveRef.current = false;
       return;
@@ -88,33 +114,33 @@ const AlertsNotifications = () => {
         const data = await response.json();
         const formattedNotifications = (data.notifications || []).map(notif => {
           // Map notification type to category
-          let type = 'System';
-          let priority = 'Info';
+          let category = 'system';
+          let priority = 'info';
           let icon = 'fa-solid fa-bell';
           let bgColor = '#eff6ff';
           let borderColor = '#bfdbfe';
 
           if (notif.notification_type === 'system') {
-            type = 'System';
+            category = 'system';
             if (notif.title?.toLowerCase().includes('invitation')) {
-              type = 'Partnership';
-              priority = 'Info';
+              category = 'partnership';
+              priority = 'info';
               icon = 'fa-solid fa-handshake';
               bgColor = '#f0fdf4';
               borderColor = '#bbf7d0';
             }
           } else if (notif.notification_type === 'load_update') {
-            type = 'Loads';
+            category = 'loads';
             icon = 'fa-solid fa-box';
           } else if (notif.notification_type === 'compliance_alert') {
-            type = 'Compliance';
-            priority = 'Critical';
+            category = 'compliance';
+            priority = 'critical';
             icon = 'fa-solid fa-exclamation-triangle';
             bgColor = '#fef2f2';
             borderColor = '#fecaca';
           } else if (notif.notification_type === 'payment') {
-            type = 'Finance';
-            priority = 'Success';
+            category = 'finance';
+            priority = 'success';
             icon = 'fa-solid fa-dollar-sign';
             bgColor = '#f0fdf4';
             borderColor = '#bbf7d0';
@@ -122,12 +148,12 @@ const AlertsNotifications = () => {
 
           return {
             id: notif.id,
-            type: type,
-            priority: priority,
+            category,
+            priority,
             title: notif.title,
             description: notif.message,
-            timestamp: notif.relative_time || notif.formatted_time || 'Recently',
-            actions: notif.action_url ? ['View Details'] : [],
+            timestamp: notif.relative_time || notif.formatted_time || null,
+            actions: notif.action_url ? ['viewDetails'] : [],
             isRead: notif.is_read || false,
             icon: icon,
             bgColor: bgColor,
@@ -163,7 +189,7 @@ const AlertsNotifications = () => {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to load alert settings');
+        throw new Error(tr('alerts.errors.loadSettingsFailed', 'Failed to load alert settings'));
       }
 
       const data = await response.json();
@@ -219,7 +245,7 @@ const AlertsNotifications = () => {
       setSettingsLoaded(true);
     } catch (error) {
       console.error('Error fetching alert settings:', error);
-      setSettingsError('Failed to load settings');
+      setSettingsError(tr('alerts.errors.loadSettingsFailedShort', 'Failed to load settings'));
       setSettingsLoaded(false);
     } finally {
       setSettingsLoading(false);
@@ -265,7 +291,7 @@ const AlertsNotifications = () => {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to save settings');
+        throw new Error(tr('alerts.errors.saveSettingsFailed', 'Failed to save settings'));
       }
 
       // Keep local state aligned with canonical values.
@@ -277,7 +303,7 @@ const AlertsNotifications = () => {
       }
     } catch (error) {
       console.error('Error saving alert settings:', error);
-      setSettingsError('Failed to save settings');
+      setSettingsError(tr('alerts.errors.saveSettingsFailed', 'Failed to save settings'));
     } finally {
       setSettingsSaving(false);
     }
@@ -305,14 +331,14 @@ const AlertsNotifications = () => {
         }
       });
       if (!response.ok) {
-        throw new Error('Failed to send test notification');
+        throw new Error(tr('alerts.errors.sendTestFailed', 'Failed to send test notification'));
       }
       // Refresh notification center data so the new item appears immediately.
       await fetchNotifications();
-      alert('Test notification sent.');
+      alert(tr('alerts.test.sent', 'Test notification sent.'));
     } catch (error) {
       console.error('Error sending test notification:', error);
-      alert('Failed to send test notification.');
+      alert(tr('alerts.test.failed', 'Failed to send test notification.'));
     }
   };
 
@@ -434,7 +460,7 @@ const AlertsNotifications = () => {
       downloadCsv(csv, `notifications_${dateStamp}.csv`);
     } catch (error) {
       console.error('Error exporting notifications:', error);
-      alert('Failed to export notifications. Please try again.');
+      alert(tr('alerts.errors.exportFailedTryAgain', 'Failed to export notifications. Please try again.'));
     } finally {
       setExporting(false);
     }
@@ -476,18 +502,15 @@ const AlertsNotifications = () => {
     }
   };
 
-  const categories = ['All Categories', 'Compliance', 'Loads', 'Finance', 'Driver/Dispatch', 'System'];
-  const statuses = ['All Status', 'Unread', 'Read', 'Critical', 'Warning'];
-
   const displayNotifications = loading ? [] : notifications;
 
   const filteredNotifications = displayNotifications.filter(notification => {
     const matchesSearch = notification.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          notification.description.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = categoryFilter === 'All Categories' || notification.type === categoryFilter;
-    const matchesStatus = statusFilter === 'All Status' || 
-                         (statusFilter === 'Unread' && !notification.isRead) ||
-                         (statusFilter === 'Read' && notification.isRead) ||
+    const matchesCategory = categoryFilter === 'all' || notification.category === categoryFilter;
+    const matchesStatus = statusFilter === 'all' ||
+                         (statusFilter === 'unread' && !notification.isRead) ||
+                         (statusFilter === 'read' && notification.isRead) ||
                          notification.priority === statusFilter;
     
     return matchesSearch && matchesCategory && matchesStatus;
@@ -495,13 +518,31 @@ const AlertsNotifications = () => {
 
   const getPriorityBadgeClass = (priority) => {
     switch (priority) {
-      case 'Critical': return 'alert-priority-critical';
-      case 'Warning': return 'alert-priority-warning';
-      case 'Success': return 'alert-priority-success';
-      case 'Info': return 'alert-priority-info';
-      case 'Update': return 'alert-priority-update';
+      case 'critical': return 'alert-priority-critical';
+      case 'warning': return 'alert-priority-warning';
+      case 'success': return 'alert-priority-success';
+      case 'info': return 'alert-priority-info';
+      case 'update': return 'alert-priority-update';
       default: return 'alert-priority-info';
     }
+  };
+
+  const categoryLabel = (value) => {
+    const opt = CATEGORY_OPTIONS.find((o) => o.value === value);
+    return opt ? tr(opt.labelKey, opt.labelFallback) : tr('common.unknown', 'Unknown');
+  };
+
+  const priorityLabel = (value) => {
+    if (value === 'critical') return tr('alerts.priority.critical', 'Critical');
+    if (value === 'warning') return tr('alerts.priority.warning', 'Warning');
+    if (value === 'success') return tr('alerts.priority.success', 'Success');
+    if (value === 'update') return tr('alerts.priority.update', 'Update');
+    return tr('alerts.priority.info', 'Info');
+  };
+
+  const actionLabel = (actionKey) => {
+    if (actionKey === 'viewDetails') return tr('alerts.actions.viewDetails', 'View Details');
+    return tr('common.view', 'View');
   };
 
   return (
@@ -509,13 +550,13 @@ const AlertsNotifications = () => {
       {/* Header */}
       <div className="alert-header">
         <div className="alert-header-content">
-          <h1>Alerts & Notifications</h1>
-          <p className="alert-header-subtitle">Manage your notifications and alert preferences</p>
+          <h1>{tr('alerts.title', 'Alerts & Notifications')}</h1>
+          <p className="alert-header-subtitle">{tr('alerts.subtitle', 'Manage your notifications and alert preferences')}</p>
         </div>
         <div className="alert-header-actions">
           <button className="btn small ghost-cd" onClick={handleExportCsv} disabled={!currentUser || exporting}>
             <i className="fas fa-download"></i>
-            {exporting ? 'Exporting...' : 'Export'}
+            {exporting ? tr('alerts.export.exporting', 'Exporting...') : tr('common.export', 'Export')}
           </button>
         </div>
       </div>
@@ -523,20 +564,20 @@ const AlertsNotifications = () => {
       {/* Tabs */}
       <div className="alert-tabs">
         <button 
-          className={`alert-tab-btn ${activeTab === 'Notification Center' ? 'active' : ''}`}
-          onClick={() => setActiveTab('Notification Center')}
+          className={`alert-tab-btn ${activeTab === TABS.center ? 'active' : ''}`}
+          onClick={() => setActiveTab(TABS.center)}
         >
-          Notification Center
+          {tr('alerts.tabs.center', 'Notification Center')}
         </button>
         <button 
-          className={`alert-tab-btn ${activeTab === 'Settings' ? 'active' : ''}`}
-          onClick={() => setActiveTab('Settings')}
+          className={`alert-tab-btn ${activeTab === TABS.settings ? 'active' : ''}`}
+          onClick={() => setActiveTab(TABS.settings)}
         >
-          Settings
+          {tr('common.settings', 'Settings')}
         </button>
       </div>
 
-      {activeTab === 'Notification Center' && (
+      {activeTab === TABS.center && (
         <>
           {/* Filter Bar */}
           <div className="alert-filters">
@@ -545,7 +586,7 @@ const AlertsNotifications = () => {
                 <i className="fas fa-search"></i>
                 <input
                   type="text"
-                  placeholder="Search notifications..."
+                  placeholder={tr('alerts.search.placeholder', 'Search notifications...')}
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
@@ -558,8 +599,8 @@ const AlertsNotifications = () => {
                 onChange={(e) => setCategoryFilter(e.target.value)}
                 className="alert-filter-select"
               >
-                {categories.map(category => (
-                  <option key={category} value={category}>{category}</option>
+                {CATEGORY_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{tr(opt.labelKey, opt.labelFallback)}</option>
                 ))}
               </select>
               
@@ -568,8 +609,8 @@ const AlertsNotifications = () => {
                 onChange={(e) => setStatusFilter(e.target.value)}
                 className="alert-filter-select"
               >
-                {statuses.map(status => (
-                  <option key={status} value={status}>{status}</option>
+                {STATUS_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{tr(opt.labelKey, opt.labelFallback)}</option>
                 ))}
               </select>
               
@@ -582,7 +623,7 @@ const AlertsNotifications = () => {
                   }
                 }}
               >
-                Mark All as Read
+                {tr('alerts.actions.markAllRead', 'Mark All as Read')}
               </button>
             </div>
           </div>
@@ -592,7 +633,7 @@ const AlertsNotifications = () => {
             {loading ? (
               <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
                 <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: '24px', marginBottom: '8px' }}></i>
-                <p>Loading notifications...</p>
+                <p>{tr('alerts.loading', 'Loading notifications...')}</p>
               </div>
             ) : (
               <>
@@ -600,7 +641,7 @@ const AlertsNotifications = () => {
                   <div 
                     key={notification.id}
                     className={`alert-notification-card ${!notification.isRead ? 'unread' : ''}`}
-                    data-type={notification.type}
+                    data-type={notification.category}
                     onClick={() => !notification.isRead && handleMarkAsRead(notification.id)}
                     style={{ cursor: !notification.isRead ? 'pointer' : 'default' }}
                   >
@@ -609,11 +650,11 @@ const AlertsNotifications = () => {
                         <span className="alert-notification-icon">
                           <i className={notification.icon}></i>
                         </span>
-                        <span className="alert-notification-type">{notification.type}</span>
+                        <span className="alert-notification-type">{categoryLabel(notification.category)}</span>
                         <span className={`alert-priority-badge ${getPriorityBadgeClass(notification.priority)}`}>
-                          {notification.priority}
+                          {priorityLabel(notification.priority)}
                         </span>
-                        <span className="alert-notification-time">{notification.timestamp}</span>
+                        <span className="alert-notification-time">{notification.timestamp || tr('alerts.recently', 'Recently')}</span>
                       </div>
                       {!notification.isRead && <div className="alert-unread-indicator"></div>}
                     </div>
@@ -633,7 +674,7 @@ const AlertsNotifications = () => {
                             handleActionClick(notification);
                           }}
                         >
-                          {action}
+                          {actionLabel(action)}
                         </button>
                       ))}
                     </div>
@@ -643,7 +684,7 @@ const AlertsNotifications = () => {
                 {filteredNotifications.length === 0 && (
                   <div className="alert-no-notifications">
                     <i className="fas fa-bell-slash"></i>
-                    <p>No notifications found matching your filters.</p>
+                    <p>{tr('alerts.empty', 'No notifications found matching your filters.')}</p>
                   </div>
                 )}
               </>
@@ -652,17 +693,17 @@ const AlertsNotifications = () => {
 
           {/* Load More */}
           <div className="alert-load-more-section">
-            <button className="btn small ghost-cd">Load More Notifications</button>
+            <button className="btn small ghost-cd">{tr('alerts.actions.loadMore', 'Load More Notifications')}</button>
           </div>
         </>
       )}
 
-      {activeTab === 'Settings' && (
+      {activeTab === TABS.settings && (
         <div className="alert-settings-content">
           {/* Alert Categories */}
           <div className="alert-settings-section">
-            <h3 className="alert-section-title">Alert Categories</h3>
-            <p className="alert-section-subtitle">Enable or disable specific types of notifications</p>
+            <h3 className="alert-section-title">{tr('alerts.settings.categories.title', 'Alert Categories')}</h3>
+            <p className="alert-section-subtitle">{tr('alerts.settings.categories.subtitle', 'Enable or disable specific types of notifications')}</p>
             
             <div className="alert-category-list">
               <div className="alert-category-item">
@@ -671,8 +712,8 @@ const AlertsNotifications = () => {
                     <i className="fa-solid fa-truck"></i>
                   </div>
                   <div className="alert-category-details">
-                    <h4>Loads</h4>
-                    <p>Deliveries, Updates, Compliance</p>
+                    <h4>{tr('alerts.category.loads', 'Loads')}</h4>
+                    <p>{tr('alerts.settings.categories.loads.desc', 'Deliveries, Updates, Compliance')}</p>
                   </div>
                 </div>
                 <label className="alert-toggle-switch">
@@ -692,8 +733,8 @@ const AlertsNotifications = () => {
                     <i className="fa-solid fa-shield-halved"></i>
                   </div>
                   <div className="alert-category-details">
-                    <h4>Compliance</h4>
-                    <p>Expiring Docs, Safety Alerts, FMCSA Updates</p>
+                    <h4>{tr('alerts.category.compliance', 'Compliance')}</h4>
+                    <p>{tr('alerts.settings.categories.compliance.desc', 'Expiring Docs, Safety Alerts, FMCSA Updates')}</p>
                   </div>
                 </div>
                 <label className="alert-toggle-switch">
@@ -713,8 +754,8 @@ const AlertsNotifications = () => {
                     <i className="fa-solid fa-dollar-sign"></i>
                   </div>
                   <div className="alert-category-details">
-                    <h4>Finance</h4>
-                    <p>Invoice Paid, Factoring Status</p>
+                    <h4>{tr('alerts.category.finance', 'Finance')}</h4>
+                    <p>{tr('alerts.settings.categories.finance.desc', 'Invoice Paid, Factoring Status')}</p>
                   </div>
                 </div>
                 <label className="alert-toggle-switch">
@@ -734,8 +775,8 @@ const AlertsNotifications = () => {
                     <i className="fa-solid fa-route"></i>
                   </div>
                   <div className="alert-category-details">
-                    <h4>Driver/Dispatch</h4>
-                    <p>HOS Violations, Equipment, Inspections</p>
+                    <h4>{tr('alerts.category.driverDispatch', 'Driver/Dispatch')}</h4>
+                    <p>{tr('alerts.settings.categories.driverDispatch.desc', 'HOS Violations, Equipment, Inspections')}</p>
                   </div>
                 </div>
                 <label className="alert-toggle-switch">
@@ -755,8 +796,8 @@ const AlertsNotifications = () => {
                     <i className="fa-solid fa-cog"></i>
                   </div>
                   <div className="alert-category-details">
-                    <h4>System</h4>
-                    <p>Maintenance Events, Updates, Security Alerts</p>
+                    <h4>{tr('alerts.category.system', 'System')}</h4>
+                    <p>{tr('alerts.settings.categories.system.desc', 'Maintenance Events, Updates, Security Alerts')}</p>
                   </div>
                 </div>
                 <label className="alert-toggle-switch">
@@ -774,33 +815,33 @@ const AlertsNotifications = () => {
 
           {/* Delivery Methods */}
           <div className="alert-settings-section">
-            <h3 className="alert-section-title">Delivery Methods</h3>
-            <p className="alert-section-subtitle">Choose how you want to receive notifications for each category</p>
+            <h3 className="alert-section-title">{tr('alerts.settings.delivery.title', 'Delivery Methods')}</h3>
+            <p className="alert-section-subtitle">{tr('alerts.settings.delivery.subtitle', 'Choose how you want to receive notifications for each category')}</p>
             
             <div className="alert-delivery-scrollwrap">
               <div className="alert-delivery-table">
               <div className="alert-delivery-header">
-                <div className="alert-category-col">Category</div>
+                <div className="alert-category-col">{tr('alerts.settings.delivery.categoryCol', 'Category')}</div>
                 <div className="alert-method-col">
                   <i className="fa-solid fa-bell"></i>
-                  In-App
+                  {tr('alerts.settings.delivery.inApp', 'In-App')}
                 </div>
                 <div className="alert-method-col">
                   <i className="fa-solid fa-envelope"></i>
-                  Email
+                  {tr('common.email', 'Email')}
                 </div>
                 <div className="alert-method-col">
                   <i className="fa-solid fa-mobile-screen"></i>
-                  SMS
+                  {tr('alerts.settings.delivery.sms', 'SMS')}
                 </div>
                 <div className="alert-method-col">
                   <i className="fa-solid fa-satellite-dish"></i>
-                  Push
+                  {tr('alerts.settings.delivery.push', 'Push')}
                 </div>
               </div>
 
               <div className="alert-delivery-row">
-                <div className="alert-category-name">Loads</div>
+                <div className="alert-category-name">{tr('alerts.category.loads', 'Loads')}</div>
                 <div className="alert-method-checkbox">
                   <input
                     type="checkbox"
@@ -836,7 +877,7 @@ const AlertsNotifications = () => {
               </div>
 
               <div className="alert-delivery-row">
-                <div className="alert-category-name">Compliance</div>
+                <div className="alert-category-name">{tr('alerts.category.compliance', 'Compliance')}</div>
                 <div className="alert-method-checkbox">
                   <input
                     type="checkbox"
@@ -872,7 +913,7 @@ const AlertsNotifications = () => {
               </div>
 
               <div className="alert-delivery-row">
-                <div className="alert-category-name">Finance</div>
+                <div className="alert-category-name">{tr('alerts.category.finance', 'Finance')}</div>
                 <div className="alert-method-checkbox">
                   <input
                     type="checkbox"
@@ -908,7 +949,7 @@ const AlertsNotifications = () => {
               </div>
 
               <div className="alert-delivery-row">
-                <div className="alert-category-name">Driver/Dispatch</div>
+                <div className="alert-category-name">{tr('alerts.category.driverDispatch', 'Driver/Dispatch')}</div>
                 <div className="alert-method-checkbox">
                   <input
                     type="checkbox"
@@ -944,7 +985,7 @@ const AlertsNotifications = () => {
               </div>
 
               <div className="alert-delivery-row">
-                <div className="alert-category-name">System</div>
+                <div className="alert-category-name">{tr('alerts.category.system', 'System')}</div>
                 <div className="alert-method-checkbox">
                   <input
                     type="checkbox"
@@ -984,8 +1025,8 @@ const AlertsNotifications = () => {
 
           {/* Quiet Hours */}
           <div className="alert-settings-section">
-            <h3 className="alert-section-title">Quiet Hours</h3>
-            <p className="alert-section-subtitle">Set hours when you don't want to receive push notifications</p>
+            <h3 className="alert-section-title">{tr('alerts.settings.quietHours.title', 'Quiet Hours')}</h3>
+            <p className="alert-section-subtitle">{tr('alerts.settings.quietHours.subtitle', "Set hours when you don't want to receive push notifications")}</p>
             
             <div className="alert-quiet-hours-toggle">
               <label className="alert-toggle-switch">
@@ -997,12 +1038,12 @@ const AlertsNotifications = () => {
                 />
                 <span className="alert-slider"></span>
               </label>
-              <span className="alert-toggle-label">Enable Quiet Hours</span>
+              <span className="alert-toggle-label">{tr('alerts.settings.quietHours.enable', 'Enable Quiet Hours')}</span>
             </div>
 
             <div className="alert-time-inputs">
               <div className="alert-time-group">
-                <label>Start Time</label>
+                <label>{tr('alerts.settings.quietHours.startTime', 'Start Time')}</label>
                 <div className="alert-time-input">
                   <input
                     type="time"
@@ -1014,7 +1055,7 @@ const AlertsNotifications = () => {
               </div>
               <div className="alert-time-separator">to</div>
               <div className="alert-time-group">
-                <label>End Time</label>
+                <label>{tr('alerts.settings.quietHours.endTime', 'End Time')}</label>
                 <div className="alert-time-input">
                   <input
                     type="time"
@@ -1028,14 +1069,14 @@ const AlertsNotifications = () => {
 
             <div className="alert-quiet-hours-note">
               <i className="fa-solid fa-info-circle"></i>
-              <span>Alerts will still be logged in your notification feed but won't trigger push notifications during quiet hours</span>
+              <span>{tr('alerts.settings.quietHours.note', "Alerts will still be logged in your notification feed but won't trigger push notifications during quiet hours")}</span>
             </div>
           </div>
 
           {/* Digest Mode */}
           <div className="alert-settings-section">
-            <h3 className="alert-section-title">Digest Mode</h3>
-            <p className="alert-section-subtitle">Choose how frequently you want to receive notification summaries</p>
+            <h3 className="alert-section-title">{tr('alerts.settings.digest.title', 'Digest Mode')}</h3>
+            <p className="alert-section-subtitle">{tr('alerts.settings.digest.subtitle', 'Choose how frequently you want to receive notification summaries')}</p>
             
             <div className="alert-digest-options">
               <label className="alert-digest-option">
@@ -1052,8 +1093,8 @@ const AlertsNotifications = () => {
                     <i className="fa-solid fa-bolt"></i>
                   </div>
                   <div className="alert-option-details">
-                    <h4>Real-Time</h4>
-                    <p>Receive notifications immediately as they occur</p>
+                    <h4>{tr('alerts.settings.digest.realtime.title', 'Real-Time')}</h4>
+                    <p>{tr('alerts.settings.digest.realtime.desc', 'Receive notifications immediately as they occur')}</p>
                   </div>
                 </div>
               </label>
@@ -1072,8 +1113,8 @@ const AlertsNotifications = () => {
                     <i className="fa-solid fa-calendar-day"></i>
                   </div>
                   <div className="alert-option-details">
-                    <h4>Daily Digest</h4>
-                    <p>Get a daily summary once per day</p>
+                    <h4>{tr('alerts.settings.digest.daily.title', 'Daily Digest')}</h4>
+                    <p>{tr('alerts.settings.digest.daily.desc', 'Get a daily summary once per day')}</p>
                   </div>
                 </div>
               </label>
@@ -1092,8 +1133,8 @@ const AlertsNotifications = () => {
                     <i className="fa-solid fa-calendar-week"></i>
                   </div>
                   <div className="alert-option-details">
-                    <h4>Weekly Digest</h4>
-                    <p>Receive a summary once per week</p>
+                    <h4>{tr('alerts.settings.digest.weekly.title', 'Weekly Digest')}</h4>
+                    <p>{tr('alerts.settings.digest.weekly.desc', 'Receive a summary once per week')}</p>
                   </div>
                 </div>
               </label>
@@ -1102,8 +1143,8 @@ const AlertsNotifications = () => {
 
           {/* Escalation Rules */}
           <div className="alert-settings-section">
-            <h3 className="alert-section-title">Escalation Rules</h3>
-            <p className="alert-section-subtitle">Automatically escalate critical alerts if not acknowledged</p>
+            <h3 className="alert-section-title">{tr('alerts.settings.escalation.title', 'Escalation Rules')}</h3>
+            <p className="alert-section-subtitle">{tr('alerts.settings.escalation.subtitle', 'Automatically escalate critical alerts if not acknowledged')}</p>
             
             <div className="alert-escalation-toggle">
               <label className="alert-toggle-switch">
@@ -1115,14 +1156,14 @@ const AlertsNotifications = () => {
                 />
                 <span className="alert-slider"></span>
               </label>
-              <span className="alert-toggle-label">Enable Escalation Rules</span>
+              <span className="alert-toggle-label">{tr('alerts.settings.escalation.enable', 'Enable Escalation Rules')}</span>
             </div>
           </div>
 
           {/* Test & App Settings */}
           <div className="alert-settings-section">
-            <h3 className="alert-section-title">Test & App Settings</h3>
-            <p className="alert-section-subtitle">Test your notification settings before saving changes</p>
+            <h3 className="alert-section-title">{tr('alerts.settings.test.title', 'Test & App Settings')}</h3>
+            <p className="alert-section-subtitle">{tr('alerts.settings.test.subtitle', 'Test your notification settings before saving changes')}</p>
             
             <div className="alert-test-settings">
               <div className="alert-test-notification">
@@ -1135,11 +1176,11 @@ const AlertsNotifications = () => {
                   />
                   <span className="alert-slider"></span>
                 </label>
-                <span className="alert-toggle-label">Test Notification</span>
+                <span className="alert-toggle-label">{tr('alerts.settings.test.testNotification', 'Test Notification')}</span>
               </div>
 
               <button className="btn small-cd" onClick={handleSendTestNotification} disabled={settingsLoading || settingsSaving || !testNotificationEnabled}>
-                Send Test
+                {tr('alerts.settings.test.sendTest', 'Send Test')}
               </button>
             </div>
 
@@ -1148,7 +1189,7 @@ const AlertsNotifications = () => {
                 <i className="fa-solid fa-info-circle"></i>
                 <div className="alert-note-text">
                   <strong>Pro Tip</strong>
-                  <p>Use the test notification feature to verify your delivery methods are working correctly. All changes are auto-saved when toggled, but content settings require manual saving.</p>
+                  <p>{tr('alerts.settings.test.proTipBody', 'Use the test notification feature to verify your delivery methods are working correctly. All changes are auto-saved when toggled, but content settings require manual saving.')}</p>
                 </div>
               </div>
             </div>
@@ -1168,11 +1209,11 @@ const AlertsNotifications = () => {
               disabled={settingsLoading || settingsSaving}
             >
               <i className="fa-solid fa-check"></i>
-              {settingsSaving ? 'Saving...' : 'Save Settings'}
+              {settingsSaving ? tr('alerts.settings.saving', 'Saving...') : tr('alerts.settings.save', 'Save Settings')}
             </button>
             {(settingsLoading || settingsError) && (
               <div style={{ marginTop: '8px', color: settingsError ? '#b91c1c' : '#6b7280', fontSize: '12px' }}>
-                {settingsLoading ? 'Loading settings...' : settingsError}
+                {settingsLoading ? tr('alerts.settings.loading', 'Loading settings...') : settingsError}
               </div>
             )}
           </div>

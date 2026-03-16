@@ -4,8 +4,20 @@ import { API_URL } from '../../config';
 import { auth } from '../../firebase';
 import Geocoder from '../common/Geocoder';
 import RouteMap from '../common/RouteMap';
+import { useTr } from '../../i18n/useTr';
 
 export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
+  const { language, tr } = useTr();
+  const locale = language === 'Spanish' ? 'es-ES' : language === 'Arabic' ? 'ar' : 'en-US';
+  const fmtMoney = (amt) => {
+    const n = Number(amt || 0);
+    try {
+      return new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' }).format(n);
+    } catch {
+      return `$${n.toFixed(2)}`;
+    }
+  };
+
   const [step, setStep] = useState(1);
   const [chargeName, setChargeName] = useState('');
   const [chargeAmount, setChargeAmount] = useState('');
@@ -260,7 +272,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
   // Get authentication token
   const getAuthToken = async () => {
     const user = auth.currentUser;
-    if (!user) throw new Error('Not authenticated');
+    if (!user) throw new Error(tr('auth.notAuthenticated', 'Not authenticated'));
     return await user.getIdToken();
   };
 
@@ -336,7 +348,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
   // Step 2: Update load with pricing & details
   const handleStep2Submit = async () => {
     if (!loadId) {
-      setError('Load ID not found. Please restart.');
+      setError(tr('addLoads.errors.loadIdNotFoundRestart', 'Load ID not found. Please restart.'));
       return;
     }
     
@@ -405,7 +417,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
   // Post load with status = ACTIVE (called from confirmation modal)
   const handlePostLoad = async () => {
     if (!loadId) {
-      setError('Load ID not found. Please restart.');
+      setError(tr('addLoads.errors.loadIdNotFoundRestart', 'Load ID not found. Please restart.'));
       return;
     }
     
@@ -445,7 +457,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to post load');
+        throw new Error(errorData.detail || tr('addLoads.errors.postFailed', 'Failed to post load'));
       }
 
       const data = await response.json();
@@ -462,7 +474,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
   // Save load as draft (called from confirmation modal)
   const handleSaveDraft = async () => {
     if (!loadId) {
-      setError('Load ID not found. Please restart.');
+      setError(tr('addLoads.errors.loadIdNotFoundRestart', 'Load ID not found. Please restart.'));
       return;
     }
     
@@ -502,7 +514,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to save draft');
+        throw new Error(errorData.detail || tr('addLoads.errors.saveDraftFailed', 'Failed to save draft'));
       }
 
       onClose(); // Close modal after saving
@@ -540,7 +552,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to generate instructions');
+        throw new Error(tr('addLoads.errors.generateInstructionsFailed', 'Failed to generate instructions'));
       }
 
       const data = await response.json();
@@ -582,7 +594,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
   return (
     <div className="add-loads-overlay" onClick={onClose}>
       <div className="add-loads-modal" onClick={(e) => e.stopPropagation()}>
-        <button className="add-loads-close" aria-label="Close" onClick={onClose}>×</button>
+        <button className="add-loads-close" aria-label={tr('common.close', 'Close')} onClick={onClose}>×</button>
         
         <div className="add-loads-page">
           <div className="add-loads-container">
@@ -590,37 +602,41 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
             {step === 1 && (
               <div className="add-loads-step">
                 <div className="step-header">
-                  <h2>Create New Load</h2>
-                  <p className="step-subtitle">Step 1 of 3 – Route & Equipment</p>
-                  <p className="step-description">{loadId ? `Load ID: ${loadId}` : 'Load ID generated after Step 1'}</p>
+                  <h2>{tr('addLoads.title', 'Create New Load')}</h2>
+                  <p className="step-subtitle">{tr('addLoads.step1.subtitle', 'Step 1 of 3 – Route & Equipment')}</p>
+                  <p className="step-description">
+                    {loadId
+                      ? `${tr('addLoads.loadIdPrefix', 'Load ID:')} ${loadId}`
+                      : tr('addLoads.loadIdGeneratedAfterStep1', 'Load ID generated after Step 1')}
+                  </p>
                   {error && <div style={{color: 'red', marginTop: '10px'}}>{error}</div>}
                 </div>
 
                 <div className="form-section">
-                  <h4 className="section-title">Route Information</h4>
-                  <p className="section-desc">Where the shipment is picked up and delivered</p>
+                  <h4 className="section-title">{tr('addLoads.sections.routeInfo.title', 'Route Information')}</h4>
+                  <p className="section-desc">{tr('addLoads.sections.routeInfo.desc', 'Where the shipment is picked up and delivered')}</p>
                   
                   <div className="grid-2">
                     <div className="form-group">
-                      <label>Origin *</label>
+                      <label>{tr('addLoads.fields.origin', 'Origin')} *</label>
                       <Geocoder
                         value={formData.origin}
                         onChange={(e) => handleInputChange({ target: { name: 'origin', value: e.target.value } })}
                         onSelect={(location) => {
                           setFormData(prev => ({ ...prev, origin: location.label }));
                         }}
-                        placeholder="City, State, Zip or Facility"
+                        placeholder={tr('addLoads.placeholders.location', 'City, State, Zip or Facility')}
                       />
                     </div>
                     <div className="form-group">
-                      <label>Destination *</label>
+                      <label>{tr('addLoads.fields.destination', 'Destination')} *</label>
                       <Geocoder
                         value={formData.destination}
                         onChange={(e) => handleInputChange({ target: { name: 'destination', value: e.target.value } })}
                         onSelect={(location) => {
                           setFormData(prev => ({ ...prev, destination: location.label }));
                         }}
-                        placeholder="City, State, Zip or Facility"
+                        placeholder={tr('addLoads.placeholders.location', 'City, State, Zip or Facility')}
                       />
                     </div>
                   </div>
@@ -628,7 +644,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                   {/* Route Preview Map */}
                   {formData.origin && formData.destination && (
                     <div className="form-group" style={{ marginTop: '20px' }}>
-                      <label>Route Preview</label>
+                      <label>{tr('addLoads.fields.routePreview', 'Route Preview')}</label>
                       <div style={{ marginTop: '8px', border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden' }}>
                         <RouteMap
                           origin={formData.origin}
@@ -650,7 +666,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
 
                   <div className="grid-2" style={{ marginTop: '10px' }}>
                     <div className="form-group">
-                      <label>Pickup Date *</label>
+                      <label>{tr('addLoads.fields.pickupDate', 'Pickup Date')} *</label>
                       <input
                         type="date"
                         name="pickupDate"
@@ -660,7 +676,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                       />
                     </div>
                     <div className="form-group">
-                      <label>Delivery Date</label>
+                      <label>{tr('addLoads.fields.deliveryDate', 'Delivery Date')}</label>
                       <input
                         type="date"
                         name="deliveryDate"
@@ -673,30 +689,30 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                 </div>
 
                 <div className="form-section">
-                  <h4 className="section-title">Equipment & Load Type</h4>
-                  <p className="section-desc">Define how this load should be handled</p>
+                  <h4 className="section-title">{tr('addLoads.sections.equipment.title', 'Equipment & Load Type')}</h4>
+                  <p className="section-desc">{tr('addLoads.sections.equipment.desc', 'Define how this load should be handled')}</p>
                   
                   <div className="grid-2">
                     <div className="form-group">
-                      <label>Equipment Type *</label>
+                      <label>{tr('addLoads.fields.equipmentType', 'Equipment Type')} *</label>
                       <select
                         name="equipmentType"
                         value={formData.equipmentType}
                         onChange={handleInputChange}
                       >
-                        <option>Dry Van</option>
-                        <option>Reefer</option>
-                        <option>Flatbed</option>
-                        <option>Stepdeck</option>
-                        <option>Power Only</option>
+                        <option value="Dry Van">{tr('addLoads.equipment.dryVan', 'Dry Van')}</option>
+                        <option value="Reefer">{tr('addLoads.equipment.reefer', 'Reefer')}</option>
+                        <option value="Flatbed">{tr('addLoads.equipment.flatbed', 'Flatbed')}</option>
+                        <option value="Stepdeck">{tr('addLoads.equipment.stepdeck', 'Stepdeck')}</option>
+                        <option value="Power Only">{tr('addLoads.equipment.powerOnly', 'Power Only')}</option>
                       </select>
                     </div>
                     <div className="form-group">
-                      <label>Weight (lbs) *</label>
+                      <label>{tr('addLoads.fields.weightLbs', 'Weight (lbs)')} *</label>
                       <input
                         type="text"
                         name="weight"
-                        placeholder="e.g. 42,000"
+                        placeholder={tr('addLoads.placeholders.weight', 'e.g. 42,000')}
                         value={formData.weight}
                         onChange={handleInputChange}
                       />
@@ -704,7 +720,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                   </div>
 
                   <div className="form-group" style={{ marginTop: '10px' }}>
-                    <label>Load Type </label>
+                    <label>{tr('addLoads.fields.loadType', 'Load Type')} </label>
                     <div className="load-type-selector">
                       <button
                         className={`load-type-btn ${formData.loadType === 'FTL' ? 'active' : ''}`}
@@ -712,7 +728,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                       >
                         <div className="btn-icon">📦</div>
                         <div className="btn-label">FTL</div>
-                        <div className="btn-desc">Dedicated trailer, no sharing</div>
+                        <div className="btn-desc">{tr('addLoads.loadType.ftl.desc', 'Dedicated trailer, no sharing')}</div>
                       </button>
                       <button
                         className={`load-type-btn ${formData.loadType === 'LTL' ? 'active' : ''}`}
@@ -720,25 +736,35 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                       >
                         <div className="btn-icon">📫</div>
                         <div className="btn-label">LTL</div>
-                        <div className="btn-desc">Shared space, multiple shippers</div>
+                        <div className="btn-desc">{tr('addLoads.loadType.ltl.desc', 'Shared space, multiple shippers')}</div>
                       </button>
                     </div>
                   </div>
 
                   <div className="form-group" style={{ marginTop: '10px' }}>
-                    <label>Pallet Count</label>
+                    <label>{tr('addLoads.fields.palletCount', 'Pallet Count')}</label>
                     <input
                       type="text"
                       name="palletCount"
-                      placeholder="Optional"
+                      placeholder={tr('common.optional', 'Optional')}
                       value={formData.palletCount}
                       onChange={handleInputChange}
                     />
                   </div>
 
                   <div className="info-box">
-                    <p><strong>Estimated Distance:</strong> {estimatedDistance ? `${estimatedDistance.toFixed(1)} miles` : 'Calculating...'}</p>
-                    <p><strong>Estimated Transit Time:</strong> {estimatedTransitTime ? `${estimatedTransitTime.toFixed(1)} hours (~${Math.ceil(estimatedTransitTime / 24)} days)` : 'Calculating...'}</p>
+                    <p>
+                      <strong>{tr('addLoads.estimate.distance', 'Estimated Distance:')}</strong>{' '}
+                      {estimatedDistance
+                        ? `${estimatedDistance.toFixed(1)} ${tr('myCarrier.units.miles', 'miles')}`
+                        : tr('addLoads.estimate.calculating', 'Calculating...')}
+                    </p>
+                    <p>
+                      <strong>{tr('addLoads.estimate.transitTime', 'Estimated Transit Time:')}</strong>{' '}
+                      {estimatedTransitTime
+                        ? `${estimatedTransitTime.toFixed(1)} ${tr('addLoads.units.hours', 'hours')} (~${Math.ceil(estimatedTransitTime / 24)} ${tr('addLoads.units.days', 'days')})`
+                        : tr('addLoads.estimate.calculating', 'Calculating...')}
+                    </p>
                   </div>
                 </div>
 
@@ -749,9 +775,9 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                     type="button"
                     onClick={() => setShowAddRoute(!showAddRoute)}
                   >
-                    + Add Additional Route & Equipment
+                    {tr('addLoads.additionalStops.addButton', '+ Add Additional Stop')}
                   </button>
-                  <p className="add-route-desc">For multi-stop or complex shipments</p>
+                  <p className="add-route-desc">{tr('addLoads.additionalStops.desc', 'For multi-stop or complex shipments')}</p>
                   
                   {showAddRoute && (
                     <div className="additional-route-form" style={{
@@ -763,27 +789,27 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                     }}>
                       <div className="grid-3" style={{ marginBottom: '12px' }}>
                         <div className="form-group">
-                          <label>Location</label>
+                          <label>{tr('addLoads.additionalStops.location', 'Location')}</label>
                           <input
                             type="text"
-                            placeholder="City, State or ZIP"
+                            placeholder={tr('addLoads.placeholders.cityStateZip', 'City, State or ZIP')}
                             value={newRouteLocation}
                             onChange={(e) => setNewRouteLocation(e.target.value)}
                           />
                         </div>
                         <div className="form-group">
-                          <label>Stop Type</label>
+                          <label>{tr('addLoads.additionalStops.stopType', 'Stop Type')}</label>
                           <select
                             value={newRouteType}
                             onChange={(e) => setNewRouteType(e.target.value)}
                           >
-                            <option value="pickup">Pickup</option>
-                            <option value="delivery">Delivery</option>
-                            <option value="stopover">Stopover</option>
+                            <option value="pickup">{tr('addLoads.additionalStops.type.pickup', 'Pickup')}</option>
+                            <option value="delivery">{tr('addLoads.additionalStops.type.delivery', 'Delivery')}</option>
+                            <option value="stopover">{tr('addLoads.additionalStops.type.stopover', 'Stopover')}</option>
                           </select>
                         </div>
                         <div className="form-group">
-                          <label>Date</label>
+                          <label>{tr('common.date', 'Date')}</label>
                           <input
                             type="date"
                             value={newRouteDate}
@@ -798,14 +824,14 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                           onClick={handleAddRoute}
                           disabled={!newRouteLocation || !newRouteDate}
                         >
-                          Add Stop
+                          {tr('addLoads.additionalStops.addStop', 'Add Stop')}
                         </button>
                         <button 
                           className="btn small ghost-cd" 
                           type="button"
                           onClick={() => setShowAddRoute(false)}
                         >
-                          Cancel
+                          {tr('common.cancel', 'Cancel')}
                         </button>
                       </div>
                     </div>
@@ -821,7 +847,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                       border: '1px solid #e2e8f0'
                     }}>
                       <h5 style={{ marginBottom: '12px', fontSize: '14px', fontWeight: '600' }}>
-                        Additional Stops ({additionalRoutes.length})
+                        {tr('addLoads.additionalStops.title', 'Additional Stops')} ({additionalRoutes.length})
                       </h5>
                       {additionalRoutes.map((route, index) => (
                         <div
@@ -849,7 +875,11 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                               background: route.type === 'pickup' ? '#dbeafe' : route.type === 'delivery' ? '#d1fae5' : '#fef3c7',
                               color: route.type === 'pickup' ? '#1e40af' : route.type === 'delivery' ? '#065f46' : '#92400e'
                             }}>
-                              {route.type}
+                              {route.type === 'pickup'
+                                ? tr('addLoads.additionalStops.type.pickup', 'Pickup')
+                                : route.type === 'delivery'
+                                  ? tr('addLoads.additionalStops.type.delivery', 'Delivery')
+                                  : tr('addLoads.additionalStops.type.stopover', 'Stopover')}
                             </span>
                             <span style={{ color: '#6b7280', fontSize: '14px' }}>
                               {route.date}
@@ -865,6 +895,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                               cursor: 'pointer',
                               fontSize: '18px'
                             }}
+                            aria-label={tr('common.remove', 'Remove')}
                           >
                             ×
                           </button>
@@ -897,7 +928,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                     }}
                   >
                     <i className="fa-solid fa-truck-pickup" style={{ marginRight: '8px' }}></i>
-                    Multiple Pickups
+                    {tr('addLoads.quickAdd.multiplePickups', 'Multiple Pickups')}
                   </button>
                   <button
                     type="button"
@@ -920,18 +951,18 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                     }}
                   >
                     <i className="fa-solid fa-route" style={{ marginRight: '8px' }}></i>
-                    Multiple Stop
+                    {tr('addLoads.quickAdd.multipleStops', 'Multiple Stops')}
                   </button>
                 </div>
 
                 <div className="step-actions">
-                  <button className="btn small ghost-cd" onClick={onClose}>Cancel</button>
+                  <button className="btn small ghost-cd" onClick={onClose}>{tr('common.cancel', 'Cancel')}</button>
                   <button 
                     className="btn small-cd" 
                     onClick={handleNext}
                     disabled={isLoading || !formData.origin || !formData.destination || !formData.pickupDate || !formData.weight}
                   >
-                    {isLoading ? 'Creating...' : 'Next → Price & Details'}
+                    {isLoading ? tr('addLoads.actions.creating', 'Creating...') : tr('addLoads.actions.nextToStep2', 'Next → Price & Details')}
                   </button>
                 </div>
               </div>
@@ -941,14 +972,14 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
             {step === 2 && (
               <div className="add-loads-step">
                 <div className="step-header">
-                  <h2>Create New Load</h2>
-                  <p className="step-subtitle">Step 2 of 3 – Price & Details</p>
-                  <p className="step-description">Load ID: {loadId || 'FP-2504-611-00123'}</p>
+                  <h2>{tr('addLoads.title', 'Create New Load')}</h2>
+                  <p className="step-subtitle">{tr('addLoads.step2.subtitle', 'Step 2 of 3 – Price & Details')}</p>
+                  <p className="step-description">{tr('addLoads.loadIdPrefix', 'Load ID:')} {loadId || tr('addLoads.loadIdPlaceholder', 'FP-2504-611-00123')}</p>
                 </div>
 
                 <div className="form-section">
-                  <h4 className="section-title">Pricing Model</h4>
-                  <p className="section-desc">How carriers will be compensated for this load</p>
+                  <h4 className="section-title">{tr('addLoads.sections.pricingModel.title', 'Pricing Model')}</h4>
+                  <p className="section-desc">{tr('addLoads.sections.pricingModel.desc', 'How carriers will be compensated for this load')}</p>
                   
                   <div className="pricing-model-selector">
                     <button
@@ -956,24 +987,24 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                       onClick={() => setFormData(prev => ({ ...prev, rateType: 'flatRate' }))}
                     >
                       <div className="pricing-icon">💚</div>
-                      <div className="pricing-label">Flat Rate</div>
-                      <div className="pricing-desc">One total price for the load</div>
+                      <div className="pricing-label">{tr('addLoads.rateType.flatRate', 'Flat Rate')}</div>
+                      <div className="pricing-desc">{tr('addLoads.rateType.flatRate.desc', 'One total price for the load')}</div>
                     </button>
                     <button
                       className={`pricing-btn ${formData.rateType === 'perMile' ? 'active' : ''}`}
                       onClick={() => setFormData(prev => ({ ...prev, rateType: 'perMile' }))}
                     >
                       <div className="pricing-icon">📍</div>
-                      <div className="pricing-label">Per Mile</div>
-                      <div className="pricing-desc">Calculated from total distance</div>
+                      <div className="pricing-label">{tr('addLoads.rateType.perMile', 'Per Mile')}</div>
+                      <div className="pricing-desc">{tr('addLoads.rateType.perMile.desc', 'Calculated from total distance')}</div>
                     </button>
                     <button
                       className={`pricing-btn ${formData.rateType === 'hourly' ? 'active' : ''}`}
                       onClick={() => setFormData(prev => ({ ...prev, rateType: 'hourly' }))}
                     >
                       <div className="pricing-icon">⏰</div>
-                      <div className="pricing-label">Per CWT</div>
-                      <div className="pricing-desc">Per hundred-weight pricing</div>
+                      <div className="pricing-label">{tr('addLoads.rateType.hourly', 'Per CWT')}</div>
+                      <div className="pricing-desc">{tr('addLoads.rateType.hourly.desc', 'Per hundred-weight pricing')}</div>
                     </button>
                   </div>
                 </div>
@@ -989,9 +1020,9 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                     }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
-                          <strong style={{ color: '#1e40af' }}>Estimated Total:</strong>
+                          <strong style={{ color: '#1e40af' }}>{tr('addLoads.estimate.total', 'Estimated Total:')}</strong>
                           <span style={{ marginLeft: '8px', color: '#6b7280' }}>
-                            {estimatedDistance} miles × ${formData.linehaul || '0'}/mile
+                            {estimatedDistance} {tr('myCarrier.units.miles', 'miles')} × ${formData.linehaul || '0'}/{tr('addLoads.units.mile', 'mile')}
                           </span>
                         </div>
                         <div style={{ fontSize: '20px', fontWeight: '700', color: '#1e40af' }}>
@@ -1002,21 +1033,28 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                   )}
                   <div className="grid-2">
                     <div className="form-group">
-                      <label>Linehaul Rate ($) *{formData.rateType === 'perMile' ? ' (per mile)' : ''}</label>
+                      <label>
+                        {tr('addLoads.fields.linehaulRate', 'Linehaul Rate ($)')} *
+                        {formData.rateType === 'perMile' ? ` (${tr('addLoads.perMileSuffix', 'per mile')})` : ''}
+                      </label>
                       <input
                         type="text"
                         name="linehaul"
-                        placeholder={formData.rateType === 'perMile' ? 'e.g. 2.50' : 'e.g. 2,750'}
+                        placeholder={
+                          formData.rateType === 'perMile'
+                            ? tr('addLoads.placeholders.perMileRate', 'e.g. 2.50')
+                            : tr('addLoads.placeholders.flatRateAmount', 'e.g. 2,750')
+                        }
                         value={formData.linehaul}
                         onChange={handleInputChange}
                       />
                     </div>
                     <div className="form-group">
-                      <label>Fuel Surcharge ($)</label>
+                      <label>{tr('addLoads.fields.fuelSurcharge', 'Fuel Surcharge ($)')}</label>
                       <input
                         type="text"
                         name="fuelSurcharge"
-                        placeholder="Optional"
+                        placeholder={tr('common.optional', 'Optional')}
                         value={formData.fuelSurcharge}
                         onChange={handleInputChange}
                       />
@@ -1024,14 +1062,14 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                   </div>
 
                   <div className="form-section">
-                    <h4 className="section-title" style={{marginTop: '20px'}}>Advanced Charges</h4>
-                    <p className="section-desc">Additional charges beyond base rate (detention, layover, etc.)</p>
+                    <h4 className="section-title" style={{marginTop: '20px'}}>{tr('addLoads.sections.advancedCharges.title', 'Advanced Charges')}</h4>
+                    <p className="section-desc">{tr('addLoads.sections.advancedCharges.desc', 'Additional charges beyond base rate (detention, layover, etc.)')}</p>
                     
                     <div className="advanced-pricing-form">
                       <div className="advanced-pricing-inputs">
                         <input
                           type="text"
-                          placeholder="Charge Name (e.g. Detention, Layover)"
+                          placeholder={tr('addLoads.placeholders.chargeName', 'Charge Name (e.g. Detention, Layover)')}
                           value={chargeName}
                           onChange={(e) => setChargeName(e.target.value)}
                           className="charge-name-input"
@@ -1039,7 +1077,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                         />
                         <input
                           type="number"
-                          placeholder="Amount ($)"
+                          placeholder={tr('addLoads.placeholders.amountUsd', 'Amount ($)')}
                           value={chargeAmount}
                           onChange={(e) => setChargeAmount(e.target.value)}
                           className="charge-amount-input"
@@ -1049,7 +1087,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                           className="btn small-cd add-charge-btn"
                           onClick={handleAddCharge}
                         >
-                          Add
+                          {tr('common.add', 'Add')}
                         </button>
                       </div>
 
@@ -1064,7 +1102,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                               <button 
                                 className="charge-remove-btn"
                                 onClick={() => handleRemoveCharge(index)}
-                                aria-label="Remove charge"
+                                aria-label={tr('addLoads.aria.removeCharge', 'Remove charge')}
                               >
                                 ×
                               </button>
@@ -1076,15 +1114,15 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                   </div>
 
                   <div className="form-section" >
-                    <h4 className="section-title" style={{marginTop: '20px'}}>Commodity & Special Requirements</h4>
-                    <p className="section-desc">Add freight details and special handling needs</p>
+                    <h4 className="section-title" style={{marginTop: '20px'}}>{tr('addLoads.sections.commodity.title', 'Commodity & Special Requirements')}</h4>
+                    <p className="section-desc">{tr('addLoads.sections.commodity.desc', 'Add freight details and special handling needs')}</p>
                     
                     <div className="form-group">
-                      <label>Commodity</label>
+                      <label>{tr('addLoads.fields.commodity', 'Commodity')}</label>
                       <input
                         type="text"
                         name="commodity"
-                        placeholder="e.g. Electronics, Produce, Machinery"
+                        placeholder={tr('addLoads.placeholders.commodity', 'e.g. Electronics, Produce, Machinery')}
                         value={formData.commodity}
                         onChange={handleInputChange}
                       />
@@ -1094,7 +1132,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                       <div className="advanced-pricing-inputs">
                         <input
                           type="text"
-                          placeholder="Special requirement (e.g. Hazmat, Team Driver, TWIC)"
+                          placeholder={tr('addLoads.placeholders.specialRequirement', 'Special requirement (e.g. Hazmat, Team Driver, TWIC)')}
                           value={chargeName}
                           onChange={(e) => setChargeName(e.target.value)}
                           className="charge-name-input"
@@ -1104,7 +1142,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                           className="btn small-cd add-charge-btn"
                           onClick={handleAddCharge}
                         >
-                          Add
+                          {tr('common.add', 'Add')}
                         </button>
                       </div>
 
@@ -1118,7 +1156,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                               <button 
                                 className="charge-remove-btn"
                                 onClick={() => handleRemoveCharge(req)}
-                                aria-label="Remove requirement"
+                                aria-label={tr('addLoads.aria.removeRequirement', 'Remove requirement')}
                               >
                                 ×
                               </button>
@@ -1131,8 +1169,8 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                 </div>
 
                 <div className="form-section">
-                  <h4 className="section-title">Payment Terms</h4>
-                  <p className="section-desc">When carriers get paid after delivery</p>
+                  <h4 className="section-title">{tr('addLoads.sections.paymentTerms.title', 'Payment Terms')}</h4>
+                  <p className="section-desc">{tr('addLoads.sections.paymentTerms.desc', 'When carriers get paid after delivery')}</p>
                   
                   <select
                     name="paymentTerms"
@@ -1140,28 +1178,28 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                     onChange={handleInputChange}
                     style={{width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #e5e7eb'}}
                   >
-                    <option value="Quick Pay">Quick Pay (1-2 days)</option>
-                    <option value="15 Days">Net 15</option>
-                    <option value="30 Days">Net 30</option>
-                    <option value="Custom">Factoring Available</option>
+                    <option value="Quick Pay">{tr('addLoads.paymentTerms.quickPay', 'Quick Pay (1-2 days)')}</option>
+                    <option value="15 Days">{tr('addLoads.paymentTerms.net15', 'Net 15')}</option>
+                    <option value="30 Days">{tr('addLoads.paymentTerms.net30', 'Net 30')}</option>
+                    <option value="Custom">{tr('addLoads.paymentTerms.factoring', 'Factoring Available')}</option>
                   </select>
                 </div>
 
                 <div className="form-section">
-                  <h4 className="section-title">Driver Instructions</h4>
-                  <p className="section-desc">Shown to the driver after booking</p>
+                  <h4 className="section-title">{tr('addLoads.sections.driverInstructions.title', 'Driver Instructions')}</h4>
+                  <p className="section-desc">{tr('addLoads.sections.driverInstructions.desc', 'Shown to the driver after booking')}</p>
                   <button 
                     className="btn small ghost-cd" 
                     onClick={handleGenerateInstructions}
                     disabled={isLoading}
                     style={{marginBottom: '10px'}}
                   >
-                    ✨ {isLoading ? 'Generating...' : 'Generate with AI'}
+                    ✨ {isLoading ? tr('addLoads.actions.generating', 'Generating...') : tr('addLoads.actions.generateWithAi', 'Generate with AI')}
                   </button>
                   
                   <textarea
                     name="notes"
-                    placeholder="Gate codes, check-in process, dock rules, contact details, safety requirements..."
+                    placeholder={tr('addLoads.placeholders.driverInstructions', 'Gate codes, check-in process, dock rules, contact details, safety requirements...')}
                     value={formData.notes}
                     onChange={handleInputChange}
                     className="driver-textarea"
@@ -1169,17 +1207,17 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                 </div>
 
                 <div className="estimated-total">
-                  <p><strong>Estimated Total Pay: ${calculateTotalPay().toLocaleString()}</strong></p>
+                  <p><strong>{tr('addLoads.estimatedTotalPay', 'Estimated Total Pay:')} {fmtMoney(calculateTotalPay())}</strong></p>
                 </div>
 
                 <div className="step-actions">
-                  <button className="btn small ghost-cd" onClick={handleBack}>← Back</button>
+                  <button className="btn small ghost-cd" onClick={handleBack}>← {tr('common.back', 'Back')}</button>
                   <button 
                     className="btn small-cd" 
                     onClick={handleNext}
                     disabled={isLoading || !formData.linehaul}
                   >
-                    {isLoading ? 'Saving...' : 'Next → Visibility'}
+                    {isLoading ? tr('common.saving', 'Saving...') : tr('addLoads.actions.nextToStep3', 'Next → Visibility')}
                   </button>
                 </div>
               </div>
@@ -1189,15 +1227,15 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
             {step === 3 && (
               <div className="add-loads-step">
                 <div className="step-header">
-                  <h2>Create New Load</h2>
-                  <p className="step-subtitle">Step 3 of 3 – Visibility & Preferences</p>
-                  <p className="step-description">Load ID: {loadId || 'FP-2504-611-00123'}</p>
+                  <h2>{tr('addLoads.title', 'Create New Load')}</h2>
+                  <p className="step-subtitle">{tr('addLoads.step3.subtitle', 'Step 3 of 3 – Visibility & Preferences')}</p>
+                  <p className="step-description">{tr('addLoads.loadIdPrefix', 'Load ID:')} {loadId || tr('addLoads.loadIdPlaceholder', 'FP-2504-611-00123')}</p>
                   {error && <div style={{color: 'red', marginTop: '10px'}}>{error}</div>}
                 </div>
 
                 <div className="form-section">
-                  <h4 className="section-title">Load Visibility</h4>
-                  <p className="section-desc">Choose who can see and book this load</p>
+                  <h4 className="section-title">{tr('addLoads.sections.visibility.title', 'Load Visibility')}</h4>
+                  <p className="section-desc">{tr('addLoads.sections.visibility.desc', 'Choose who can see and book this load')}</p>
                   
                   <div className="visibility-selector">
                     <button
@@ -1205,47 +1243,47 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                       onClick={() => handleVisibilitySelect('public')}
                     >
                       <div className="visibility-icon">🌐</div>
-                      <div className="visibility-label">Public Marketplace</div>
-                      <div className="visibility-desc">Visible to all approved carriers</div>
+                      <div className="visibility-label">{tr('addLoads.visibility.public.label', 'Public Marketplace')}</div>
+                      <div className="visibility-desc">{tr('addLoads.visibility.public.desc', 'Visible to all approved carriers')}</div>
                     </button>
                     <button
                       className={`visibility-btn ${formData.visibility === 'network' ? 'active' : ''} ${isShipper ? 'disabled' : ''}`}
                       onClick={() => handleVisibilitySelect('network')}
                       disabled={isShipper}
                       aria-disabled={isShipper}
-                      title={isShipper ? 'Coming soon' : undefined}
+                      title={isShipper ? tr('common.comingSoon', 'Coming soon') : undefined}
                       type="button"
                     >
                       <div className="visibility-icon">🤝</div>
-                      <div className="visibility-label">My Network</div>
-                      <div className="visibility-desc">Preferred and contracted carriers</div>
-                      {isShipper ? <div className="visibility-desc">Coming soon</div> : null}
+                      <div className="visibility-label">{tr('addLoads.visibility.network.label', 'My Network')}</div>
+                      <div className="visibility-desc">{tr('addLoads.visibility.network.desc', 'Preferred and contracted carriers')}</div>
+                      {isShipper ? <div className="visibility-desc">{tr('common.comingSoon', 'Coming soon')}</div> : null}
                     </button>
                     <button
                       className={`visibility-btn ${formData.visibility === 'private' ? 'active' : ''} ${isShipper ? 'disabled' : ''}`}
                       onClick={() => handleVisibilitySelect('private')}
                       disabled={isShipper}
                       aria-disabled={isShipper}
-                      title={isShipper ? 'Coming soon' : undefined}
+                      title={isShipper ? tr('common.comingSoon', 'Coming soon') : undefined}
                       type="button"
                     >
                       <div className="visibility-icon">🔒</div>
-                      <div className="visibility-label">Private</div>
-                      <div className="visibility-desc">Invitation only, select carriers</div>
-                      {isShipper ? <div className="visibility-desc">Coming soon</div> : null}
+                      <div className="visibility-label">{tr('addLoads.visibility.private.label', 'Private')}</div>
+                      <div className="visibility-desc">{tr('addLoads.visibility.private.desc', 'Invitation only, select carriers')}</div>
+                      {isShipper ? <div className="visibility-desc">{tr('common.comingSoon', 'Coming soon')}</div> : null}
                     </button>
                   </div>
                 </div>
 
                 <div className="form-section">
-                  <h4 className="section-title">Automation</h4>
-                  <p className="section-desc">Speed up booking with intelligent automation.</p>
+                  <h4 className="section-title">{tr('addLoads.sections.automation.title', 'Automation')}</h4>
+                  <p className="section-desc">{tr('addLoads.sections.automation.desc', 'Speed up booking with intelligent automation.')}</p>
                   
                   <div className="automation-items">
                     <div className="automation-row">
                       <div className="automation-left">
                         <div className="automation-title">Auto Match Carriers with AI</div>
-                        <div className="automation-desc">Automatically suggest best fit carriers</div>
+                        <div className="automation-desc">{tr('addLoads.automation.autoMatch.desc', 'Automatically suggest best fit carriers')}</div>
                       </div>
                       <label className="toggle-label">
                         <input
@@ -1262,7 +1300,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                     <div className="automation-row">
                       <div className="automation-left">
                         <div className="automation-title">Instant Booking</div>
-                        <div className="automation-desc">Allow carriers to book without approval</div>
+                        <div className="automation-desc">{tr('addLoads.automation.instantBooking.desc', 'Allow carriers to book without approval')}</div>
                       </div>
                       <label className="toggle-label">
                         <input
@@ -1279,7 +1317,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                     <div className="automation-row">
                       <div className="automation-left">
                         <div className="automation-title">Post to FreightPower Network</div>
-                        <div className="automation-desc">Publish to FreightPower marketplace</div>
+                        <div className="automation-desc">{tr('addLoads.automation.postFreightPower.desc', 'Publish to FreightPower marketplace')}</div>
                       </div>
                       <label className="toggle-label">
                         <input
@@ -1296,7 +1334,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                     <div className="automation-row">
                       <div className="automation-left">
                         <div className="automation-title">Post to TruckStop</div>
-                        <div className="automation-desc">Publish to TruckStop.com load board</div>
+                        <div className="automation-desc">{tr('addLoads.automation.postTruckStop.desc', 'Publish to TruckStop.com load board')}</div>
                       </div>
                       <label className="toggle-label">
                         <input
@@ -1313,7 +1351,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                     <div className="automation-row">
                       <div className="automation-left">
                         <div className="automation-title">Post to 123Loadboard</div>
-                        <div className="automation-desc">Publish to 123Loadboard.com</div>
+                        <div className="automation-desc">{tr('addLoads.automation.post123Loadboard.desc', 'Publish to 123Loadboard.com')}</div>
                       </div>
                       <label className="toggle-label">
                         <input
@@ -1330,14 +1368,14 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                 </div>
 
                 <div className="form-section">
-                  <h4 className="section-title">Notifications</h4>
-                  <p className="section-desc">Get alerts about carrier activity</p>
+                  <h4 className="section-title">{tr('common.notifications', 'Notifications')}</h4>
+                  <p className="section-desc">{tr('addLoads.sections.notifications.desc', 'Get alerts about carrier activity')}</p>
                   
                   <div className="automation-items">
                     <div className="automation-row">
                       <div className="automation-left">
                         <div className="automation-title">Notify on Carrier Views</div>
-                        <div className="automation-desc">Alert when carriers view this load</div>
+                        <div className="automation-desc">{tr('addLoads.notifications.carrierViews.desc', 'Alert when carriers view this load')}</div>
                       </div>
                       <label className="toggle-label">
                         <input
@@ -1354,7 +1392,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                     <div className="automation-row">
                       <div className="automation-left">
                         <div className="automation-title">Notify on Offer Received</div>
-                        <div className="automation-desc">Alert when carriers send booking offers</div>
+                        <div className="automation-desc">{tr('addLoads.notifications.offerReceived.desc', 'Alert when carriers send booking offers')}</div>
                       </div>
                       <label className="toggle-label">
                         <input
@@ -1371,7 +1409,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                     <div className="automation-row">
                       <div className="automation-left">
                         <div className="automation-title">Notify on Load Covered</div>
-                        <div className="automation-desc">Alert when load is successfully booked</div>
+                        <div className="automation-desc">{tr('addLoads.notifications.loadCovered.desc', 'Alert when load is successfully booked')}</div>
                       </div>
                       <label className="toggle-label">
                         <input
@@ -1388,19 +1426,19 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                 </div>
 
                 <div className="form-section">
-                  <h4 className="section-title">AI Recommendations</h4>
-                  <p className="section-desc">Smart insights based on your load details</p>
+                  <h4 className="section-title">{tr('addLoads.sections.aiRecommendations.title', 'AI Recommendations')}</h4>
+                  <p className="section-desc">{tr('addLoads.sections.aiRecommendations.desc', 'Smart insights based on your load details')}</p>
                   
                   {matchedCarriers.length > 0 ? (
                     <div className="ai-recommendations">
                       <div className="ai-item">
-                        <div className="ai-title">✅ Matched Carriers Found</div>
-                        <div className="ai-desc">{matchedCarriers.length} carriers matched with scores</div>
+                        <div className="ai-title">✅ {tr('addLoads.ai.matchedCarriersFound', 'Matched Carriers Found')}</div>
+                        <div className="ai-desc">{matchedCarriers.length} {tr('addLoads.ai.carriersMatchedWithScores', 'carriers matched with scores')}</div>
                       </div>
                       {matchedCarriers.slice(0, 3).map((match, idx) => (
                         <div key={idx} className="ai-item">
-                          <div className="ai-title">Carrier: {match.carrier_id}</div>
-                          <div className="ai-desc">Score: {(match.score * 100).toFixed(0)}% - {match.reasons?.join(', ')}</div>
+                          <div className="ai-title">{tr('addLoads.ai.carrierPrefix', 'Carrier:')} {match.carrier_id}</div>
+                          <div className="ai-desc">{tr('addLoads.ai.scorePrefix', 'Score:')} {(match.score * 100).toFixed(0)}% - {match.reasons?.join(', ')}</div>
                           <div className="ai-icon">🚛</div>
                         </div>
                       ))}
@@ -1408,20 +1446,20 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                   ) : (
                     <div className="ai-recommendations">
                       <div className="ai-item">
-                        <div className="ai-title">Best Time to Post</div>
-                        <div className="ai-desc">Wednesday 10:00 AM – Max carrier engagement</div>
+                        <div className="ai-title">{tr('addLoads.ai.bestTimeToPost.title', 'Best Time to Post')}</div>
+                        <div className="ai-desc">{tr('addLoads.ai.bestTimeToPost.desc', 'Wednesday 10:00 AM – Max carrier engagement')}</div>
                         <div className="ai-icon">🕐</div>
                       </div>
 
                       <div className="ai-item">
-                        <div className="ai-title">Rate Analysis</div>
-                        <div className="ai-desc">Current rate is competitive for this lane</div>
+                        <div className="ai-title">{tr('addLoads.ai.rateAnalysis.title', 'Rate Analysis')}</div>
+                        <div className="ai-desc">{tr('addLoads.ai.rateAnalysis.desc', 'Current rate is competitive for this lane')}</div>
                         <div className="ai-icon">📊</div>
                       </div>
 
                       <div className="ai-item">
-                        <div className="ai-title">Matching Ready</div>
-                        <div className="ai-desc">AI will find best carriers when posted</div>
+                        <div className="ai-title">{tr('addLoads.ai.matchingReady.title', 'Matching Ready')}</div>
+                        <div className="ai-desc">{tr('addLoads.ai.matchingReady.desc', 'AI will find best carriers when posted')}</div>
                         <div className="ai-icon">✅</div>
                       </div>
                     </div>
@@ -1429,35 +1467,43 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                 </div>
 
                 <div className="review-summary">
-                  <h4>Review Summary</h4>
+                  <h4>{tr('addLoads.reviewSummary.title', 'Review Summary')}</h4>
                   <div className="summary-grid">
                     <div className="summary-item">
-                      <div className="summary-label">Route</div>
+                      <div className="summary-label">{tr('addLoads.reviewSummary.route', 'Route')}</div>
                       <div className="summary-value">{formData.origin} → {formData.destination}</div>
                     </div>
                     <div className="summary-item">
-                      <div className="summary-label">Equipment</div>
-                      <div className="summary-value">{formData.equipmentType} - {formData.loadType}</div>
+                      <div className="summary-label">{tr('addLoads.reviewSummary.equipment', 'Equipment')}</div>
+                      <div className="summary-value">
+                        {(formData.equipmentType === 'Dry Van' ? tr('addLoads.equipment.dryVan', 'Dry Van')
+                          : formData.equipmentType === 'Reefer' ? tr('addLoads.equipment.reefer', 'Reefer')
+                            : formData.equipmentType === 'Flatbed' ? tr('addLoads.equipment.flatbed', 'Flatbed')
+                              : formData.equipmentType === 'Stepdeck' ? tr('addLoads.equipment.stepdeck', 'Stepdeck')
+                                : tr('addLoads.equipment.powerOnly', 'Power Only'))}
+                        {' - '}
+                        {formData.loadType}
+                      </div>
                     </div>
                     <div className="summary-item">
-                      <div className="summary-label">Total Pay</div>
-                      <div className="summary-value">${calculateTotalPay().toLocaleString()}</div>
+                      <div className="summary-label">{tr('addLoads.reviewSummary.totalPay', 'Total Pay')}</div>
+                      <div className="summary-value">{fmtMoney(calculateTotalPay())}</div>
                     </div>
                   </div>
                   <div className="summary-notes">
-                    <p>✅ Everything looks good and ready to post</p>
-                    <p className="optional-note">You can edit this load later if needed</p>
+                    <p>✅ {tr('addLoads.reviewSummary.readyToPost', 'Everything looks good and ready to post')}</p>
+                    <p className="optional-note">{tr('addLoads.reviewSummary.editLater', 'You can edit this load later if needed')}</p>
                   </div>
                 </div>
 
                 <div className="step-actions">
-                  <button className="btn small ghost-cd" onClick={handleBack}>← Back</button>
+                  <button className="btn small ghost-cd" onClick={handleBack}>← {tr('common.back', 'Back')}</button>
                   <button 
                     className="btn small-cd" 
                     onClick={handleReviewLoad}
                     disabled={isLoading}
                   >
-                    {isLoading ? 'Processing...' : 'Proceed to Post →'}
+                    {isLoading ? tr('addLoads.actions.processing', 'Processing...') : tr('addLoads.actions.proceedToPost', 'Proceed to Post →')}
                   </button>
                 </div>
               </div>
@@ -1467,8 +1513,8 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
             {step === 4 && (
               <div className="add-loads-step">
                 <div className="review-confirm-header">
-                  <h2>Load Successfully Posted! 🎉</h2>
-                  <p className="load-id-text">Load ID: {loadId}</p>
+                  <h2>{tr('addLoads.posted.title', 'Load Successfully Posted! 🎉')}</h2>
+                  <p className="load-id-text">{tr('addLoads.loadIdPrefix', 'Load ID:')} {loadId}</p>
                 </div>
 
                 <div className="success-banner">
@@ -1476,20 +1522,23 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                     <circle cx="10" cy="10" r="10" fill="#10b981"/>
                     <path d="M6 10l2 2 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                   </svg>
-                  <span>Your load is now visible to carriers. {matchedCarriers.length > 0 ? `${matchedCarriers.length} carriers matched!` : ''}</span>
+                  <span>
+                    {tr('addLoads.posted.visibleToCarriers', 'Your load is now visible to carriers.')}{' '}
+                    {matchedCarriers.length > 0 ? `${matchedCarriers.length} ${tr('addLoads.posted.carriersMatched', 'carriers matched!')}` : ''}
+                  </span>
                 </div>
 
                 {matchedCarriers.length > 0 && (
                   <div className="confirm-card full-width" style={{marginBottom: '20px'}}>
-                    <h3 className="confirm-card-title">🎯 AI Matched Carriers</h3>
-                    <p className="confirm-card-subtitle">Top carriers for this load</p>
+                    <h3 className="confirm-card-title">🎯 {tr('addLoads.posted.aiMatchedCarriers', 'AI Matched Carriers')}</h3>
+                    <p className="confirm-card-subtitle">{tr('addLoads.posted.topCarriers', 'Top carriers for this load')}</p>
                     
                     <div className="ai-recommendations">
                       {matchedCarriers.map((match, idx) => (
                         <div key={idx} className="ai-item">
-                          <div className="ai-title">#{idx + 1} - Carrier {match.carrier_id}</div>
+                          <div className="ai-title">#{idx + 1} - {tr('addLoads.ai.carrierPrefixShort', 'Carrier')} {match.carrier_id}</div>
                           <div className="ai-desc">
-                            Match Score: {(match.score * 100).toFixed(0)}%
+                            {tr('addLoads.ai.matchScorePrefix', 'Match Score:')} {(match.score * 100).toFixed(0)}%
                             {match.reasons && ` • ${match.reasons.join(', ')}`}
                           </div>
                           <div className="ai-icon">🚛</div>
@@ -1502,27 +1551,27 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                 <div className="confirmation-grid">
                   {/* Route Summary */}
                   <div className="confirm-card">
-                    <h3 className="confirm-card-title">Route Summary</h3>
-                    <p className="confirm-card-subtitle">Pickup & delivery details</p>
+                    <h3 className="confirm-card-title">{tr('addLoads.confirm.routeSummary.title', 'Route Summary')}</h3>
+                    <p className="confirm-card-subtitle">{tr('addLoads.confirm.routeSummary.subtitle', 'Pickup & delivery details')}</p>
                     
                     <div className="confirm-detail-row">
                       <div className="confirm-detail-col">
-                        <label className="confirm-label">Origin</label>
+                        <label className="confirm-label">{tr('addLoads.fields.origin', 'Origin')}</label>
                         <p className="confirm-value">{formData.origin || '—'}</p>
                       </div>
                       <div className="confirm-detail-col">
-                        <label className="confirm-label">Destination</label>
+                        <label className="confirm-label">{tr('addLoads.fields.destination', 'Destination')}</label>
                         <p className="confirm-value">{formData.destination || '—'}</p>
                       </div>
                     </div>
 
                     <div className="confirm-detail-row">
                       <div className="confirm-detail-col">
-                        <label className="confirm-label">Pickup Date</label>
+                        <label className="confirm-label">{tr('addLoads.fields.pickupDate', 'Pickup Date')}</label>
                         <p className="confirm-value">{formData.pickupDate || '—'}</p>
                       </div>
                       <div className="confirm-detail-col">
-                        <label className="confirm-label">Delivery Date</label>
+                        <label className="confirm-label">{tr('addLoads.fields.deliveryDate', 'Delivery Date')}</label>
                         <p className="confirm-value">{formData.deliveryDate || '—'}</p>
                       </div>
                     </div>
@@ -1530,13 +1579,13 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                     {estimatedDistance && (
                       <div className="confirm-detail-row">
                         <div className="confirm-detail-col">
-                          <label className="confirm-label">Distance</label>
-                          <p className="confirm-value">{estimatedDistance} miles</p>
+                          <label className="confirm-label">{tr('addLoads.confirm.distance', 'Distance')}</label>
+                          <p className="confirm-value">{estimatedDistance} {tr('myCarrier.units.miles', 'miles')}</p>
                         </div>
                         {estimatedTransitTime && (
                           <div className="confirm-detail-col">
-                            <label className="confirm-label">Transit Time</label>
-                            <p className="confirm-value">{estimatedTransitTime} hours</p>
+                            <label className="confirm-label">{tr('addLoads.confirm.transitTime', 'Transit Time')}</label>
+                            <p className="confirm-value">{estimatedTransitTime} {tr('addLoads.units.hours', 'hours')}</p>
                           </div>
                         )}
                       </div>
@@ -1547,8 +1596,8 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                   {formData.origin && formData.destination && (
                     <div className="confirm-detail-row" style={{ marginTop: '20px', gridColumn: '1 / -1' }}>
                       <div className="confirm-card" style={{ width: '100%' }}>
-                        <h3 className="confirm-card-title">Route Map</h3>
-                        <p className="confirm-card-subtitle">Full route visualization</p>
+                        <h3 className="confirm-card-title">{tr('addLoads.confirm.routeMap.title', 'Route Map')}</h3>
+                        <p className="confirm-card-subtitle">{tr('addLoads.confirm.routeMap.subtitle', 'Full route visualization')}</p>
                         <div style={{ marginTop: '12px', border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden' }}>
                           <RouteMap
                             origin={formData.origin}
@@ -1566,17 +1615,17 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
 
                   {/* Pricing Summary */}
                   <div className="confirm-card">
-                    <h3 className="confirm-card-title">Pricing Summary</h3>
-                    <p className="confirm-card-subtitle">Carrier compensation</p>
+                    <h3 className="confirm-card-title">{tr('addLoads.confirm.pricingSummary.title', 'Pricing Summary')}</h3>
+                    <p className="confirm-card-subtitle">{tr('addLoads.confirm.pricingSummary.subtitle', 'Carrier compensation')}</p>
                     
                     <div className="pricing-breakdown">
                       <div className="pricing-row">
-                        <span>Linehaul</span>
+                        <span>{tr('addLoads.pricing.linehaul', 'Linehaul')}</span>
                         <span className="pricing-amount">${formData.linehaul || '0'}</span>
                       </div>
                       {formData.fuelSurcharge && (
                         <div className="pricing-row">
-                          <span>Fuel Surcharge</span>
+                          <span>{tr('addLoads.pricing.fuelSurcharge', 'Fuel Surcharge')}</span>
                           <span className="pricing-amount">${formData.fuelSurcharge}</span>
                         </div>
                       )}
@@ -1588,15 +1637,21 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                       ))}
                       <div className="pricing-divider"></div>
                       <div className="pricing-row pricing-total">
-                        <span>Total Pay</span>
-                        <span className="pricing-amount">${calculateTotalPay().toLocaleString()}</span>
+                        <span>{tr('addLoads.reviewSummary.totalPay', 'Total Pay')}</span>
+                        <span className="pricing-amount">{fmtMoney(calculateTotalPay())}</span>
                       </div>
                       <div className="pricing-row">
-                        <span>Rate Type</span>
-                        <span className="pricing-amount">{formData.rateType.replace('Rate', ' Rate')}</span>
+                        <span>{tr('addLoads.pricing.rateType', 'Rate Type')}</span>
+                        <span className="pricing-amount">
+                          {formData.rateType === 'flatRate'
+                            ? tr('addLoads.rateType.flatRate', 'Flat Rate')
+                            : formData.rateType === 'perMile'
+                              ? tr('addLoads.rateType.perMile', 'Per Mile')
+                              : tr('addLoads.rateType.hourly', 'Per CWT')}
+                        </span>
                       </div>
                       <div className="pricing-row">
-                        <span>Payment Terms</span>
+                        <span>{tr('addLoads.pricing.paymentTerms', 'Payment Terms')}</span>
                         <span className="pricing-amount">{formData.paymentTerms.replace('_', ' ')}</span>
                       </div>
                     </div>
@@ -1605,21 +1660,29 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
 
                 {/* Equipment & Freight */}
                 <div className="confirm-card full-width">
-                  <h3 className="confirm-card-title">Equipment & Freight</h3>
-                  <p className="confirm-card-subtitle">Load configuration</p>
+                  <h3 className="confirm-card-title">{tr('addLoads.confirm.equipmentFreight.title', 'Equipment & Freight')}</h3>
+                  <p className="confirm-card-subtitle">{tr('addLoads.confirm.equipmentFreight.subtitle', 'Load configuration')}</p>
                   
                   <div className="confirm-detail-row">
                     <div className="confirm-detail-col">
-                      <label className="confirm-label">Equipment</label>
-                      <p className="confirm-value">{formData.equipmentType} - {formData.loadType}</p>
+                      <label className="confirm-label">{tr('addLoads.reviewSummary.equipment', 'Equipment')}</label>
+                      <p className="confirm-value">
+                        {(formData.equipmentType === 'Dry Van' ? tr('addLoads.equipment.dryVan', 'Dry Van')
+                          : formData.equipmentType === 'Reefer' ? tr('addLoads.equipment.reefer', 'Reefer')
+                            : formData.equipmentType === 'Flatbed' ? tr('addLoads.equipment.flatbed', 'Flatbed')
+                              : formData.equipmentType === 'Stepdeck' ? tr('addLoads.equipment.stepdeck', 'Stepdeck')
+                                : tr('addLoads.equipment.powerOnly', 'Power Only'))}
+                        {' - '}
+                        {formData.loadType}
+                      </p>
                     </div>
                     <div className="confirm-detail-col">
-                      <label className="confirm-label">Weight</label>
-                      <p className="confirm-value">{formData.weight ? `${formData.weight} lbs` : '—'}</p>
+                      <label className="confirm-label">{tr('addLoads.confirm.weight', 'Weight')}</label>
+                      <p className="confirm-value">{formData.weight ? `${formData.weight} ${tr('common.lbs', 'lbs')}` : '—'}</p>
                     </div>
                     {formData.palletCount && (
                       <div className="confirm-detail-col">
-                        <label className="confirm-label">Pallets</label>
+                        <label className="confirm-label">{tr('addLoads.confirm.pallets', 'Pallets')}</label>
                         <p className="confirm-value">{formData.palletCount}</p>
                       </div>
                     )}
@@ -1628,7 +1691,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                   {formData.commodity && (
                     <div className="confirm-detail-row">
                       <div className="confirm-detail-col">
-                        <label className="confirm-label">Commodity</label>
+                        <label className="confirm-label">{tr('addLoads.fields.commodity', 'Commodity')}</label>
                         <p className="confirm-value">{formData.commodity}</p>
                       </div>
                     </div>
@@ -1637,7 +1700,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                   {formData.specialRequirements.length > 0 && (
                     <div className="confirm-detail-row">
                       <div className="confirm-detail-col">
-                        <label className="confirm-label">Special Requirements</label>
+                        <label className="confirm-label">{tr('addLoads.confirm.specialRequirements', 'Special Requirements')}</label>
                         <div className="posting-tags">
                           {formData.specialRequirements.map((req, idx) => (
                             <span key={idx} className="posting-tag">{req}</span>
@@ -1650,38 +1713,40 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
 
                 {/* Posting & Booking */}
                 <div className="confirm-card full-width" style={{marginTop: '20px'}}>
-                  <h3 className="confirm-card-title">Posting & Automation</h3>
-                  <p className="confirm-card-subtitle">Visibility & automation settings</p>
+                  <h3 className="confirm-card-title">{tr('addLoads.confirm.postingAutomation.title', 'Posting & Automation')}</h3>
+                  <p className="confirm-card-subtitle">{tr('addLoads.confirm.postingAutomation.subtitle', 'Visibility & automation settings')}</p>
                   
                   <div className="posting-tags">
                     <span className="posting-tag">
-                      {formData.visibility === 'public' ? '🌐 Public Marketplace' : 
-                       formData.visibility === 'network' ? '🤝 My Network' : 
-                       '🔒 Private'}
+                      {formData.visibility === 'public'
+                        ? `🌐 ${tr('addLoads.visibility.public.label', 'Public Marketplace')}`
+                        : formData.visibility === 'network'
+                          ? `🤝 ${tr('addLoads.visibility.network.label', 'My Network')}`
+                          : `🔒 ${tr('addLoads.visibility.private.label', 'Private')}`}
                     </span>
                     {formData.autoMatch && (
-                      <span className="posting-tag">🤖 Auto-Match AI</span>
+                      <span className="posting-tag">🤖 {tr('addLoads.tags.autoMatch', 'Auto-Match AI')}</span>
                     )}
                     {formData.instantBooking && (
-                      <span className="posting-tag">⚡ Instant Booking</span>
+                      <span className="posting-tag">⚡ {tr('addLoads.tags.instantBooking', 'Instant Booking')}</span>
                     )}
                     {formData.autoPostToFreightpower && (
-                      <span className="posting-tag">✅ FreightPower</span>
+                      <span className="posting-tag">✅ {tr('addLoads.tags.freightPower', 'FreightPower')}</span>
                     )}
                     {formData.autoPostToTruckstop && (
-                      <span className="posting-tag">✅ TruckStop</span>
+                      <span className="posting-tag">✅ {tr('addLoads.tags.truckStop', 'TruckStop')}</span>
                     )}
                     {formData.autoPostTo123loadboard && (
-                      <span className="posting-tag">✅ 123Loadboard</span>
+                      <span className="posting-tag">✅ {tr('addLoads.tags.loadboard123', '123Loadboard')}</span>
                     )}
                   </div>
                   
                   <div style={{marginTop: '15px'}}>
                     <p style={{fontSize: '14px', color: '#6b7280'}}>
-                      📬 Notifications enabled for: 
-                      {formData.notifyOnCarrierViews && ' Carrier Views'}
-                      {formData.notifyOnOfferReceived && ' • Offers Received'}
-                      {formData.notifyOnLoadCovered && ' • Load Covered'}
+                      📬 {tr('addLoads.notifications.enabledForPrefix', 'Notifications enabled for:')}
+                      {formData.notifyOnCarrierViews && ` ${tr('addLoads.notifications.enabledFor.carrierViews', 'Carrier Views')}`}
+                      {formData.notifyOnOfferReceived && ` • ${tr('addLoads.notifications.enabledFor.offersReceived', 'Offers Received')}`}
+                      {formData.notifyOnLoadCovered && ` • ${tr('addLoads.notifications.enabledFor.loadCovered', 'Load Covered')}`}
                     </p>
                   </div>
                 </div>
@@ -1689,8 +1754,8 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                 {/* Driver Instructions */}
                 {formData.notes && (
                   <div className="confirm-card full-width" style={{marginTop: '20px'}}>
-                    <h3 className="confirm-card-title">Driver Instructions</h3>
-                    <p className="confirm-card-subtitle">Visible to carrier after booking</p>
+                    <h3 className="confirm-card-title">{tr('addLoads.sections.driverInstructions.title', 'Driver Instructions')}</h3>
+                    <p className="confirm-card-subtitle">{tr('addLoads.confirm.driverInstructions.visibleAfterBooking', 'Visible to carrier after booking')}</p>
                     
                     <p className="driver-instructions-text">
                       {formData.notes}
@@ -1706,7 +1771,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                       disabled={isLoading}
                       style={{marginRight: '12px'}}
                     >
-                      {isLoading ? 'Saving...' : '💾 Save Draft'}
+                      {isLoading ? tr('common.saving', 'Saving...') : `💾 ${tr('addLoads.actions.saveDraft', 'Save Draft')}`}
                     </button>
                   )}
                   <button 
@@ -1714,7 +1779,7 @@ export default function AddLoads({ onClose, draftLoad, isShipper = false }) {
                     onClick={handlePostLoad}
                     disabled={isLoading}
                   >
-                    {isLoading ? 'Posting...' : '✓ Post Load'}
+                    {isLoading ? tr('addLoads.actions.posting', 'Posting...') : `✓ ${tr('addLoads.actions.postLoad', 'Post Load')}`}
                   </button>
                 </div>
               </div>

@@ -6,6 +6,7 @@ import { API_URL } from '../../config'
 import { AUTO_REFRESH_MS } from '../../constants/refresh'
 import MapSnapshot from '../common/MapSnapshot'
 import RouteMap from '../common/RouteMap'
+import { useTr } from '../../i18n/useTr'
 
 // Minimum onboarding score required to access marketplace
 const MARKETPLACE_THRESHOLD = 60
@@ -37,6 +38,18 @@ function writeAccessCache(uid, data) {
 
 export default function Marketplace({ activeSection, setActiveSection }) {
   const { currentUser } = useAuth()
+  const { language, tr } = useTr()
+  const locale = language === 'Spanish' ? 'es-ES' : language === 'Arabic' ? 'ar' : 'en-US'
+
+  const fmtUsd = (amount) => {
+    const n = Number(amount)
+    if (!Number.isFinite(n)) return tr('common.na', 'N/A')
+    try {
+      return new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' }).format(n)
+    } catch {
+      return `$${n.toFixed(2)}`
+    }
+  }
   const cachedAccess = readAccessCache(currentUser?.uid)
   const [activeTab, setActiveTab] = useState(activeSection || 'loads') // loads | drivers | services
   const [searchQuery, setSearchQuery] = useState('')
@@ -109,6 +122,18 @@ export default function Marketplace({ activeSection, setActiveSection }) {
     if (normalized.includes('step')) return 'stepdeck';
     if (normalized.includes('power')) return 'powerOnly';
     return 'dryVan';
+  }
+
+  const getEquipmentLabel = (label) => {
+    const raw = String(label || '').trim()
+    if (!raw) return tr('common.na', 'N/A')
+    const normalized = raw.toLowerCase()
+    if (normalized.includes('reefer')) return tr('marketplace.filters.equipmentType.reefer', 'Reefer')
+    if (normalized.includes('flat')) return tr('marketplace.filters.equipmentType.flatbed', 'Flatbed')
+    if (normalized.includes('dry') || normalized.includes('van')) return tr('marketplace.filters.equipmentType.dryVan', 'Dry Van')
+    if (normalized.includes('power')) return tr('marketplace.filters.equipmentType.powerOnly', 'Power Only')
+    if (normalized.includes('step')) return tr('marketplace.filters.equipmentType.stepDeck', 'Step Deck')
+    return raw
   }
 
   // Check onboarding status AND consent eligibility to gate marketplace
@@ -269,7 +294,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
           }
           
           // Format weight
-          const weightDisplay = load.weight ? `${load.weight.toLocaleString()} lbs` : 'N/A'
+          const weightDisplay = load.weight ? `${Number(load.weight).toLocaleString(locale)} ${tr('common.lbs', 'lbs')}` : tr('common.na', 'N/A')
           
           // Format price - check multiple rate fields (total_rate, linehaul_rate, rate)
           let priceValue = null
@@ -283,22 +308,24 @@ export default function Marketplace({ activeSection, setActiveSection }) {
           
           // Only show "Negotiable" if no rate is available at all
           const priceDisplay = priceValue !== null && !isNaN(priceValue) && priceValue > 0 
-            ? `$${priceValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+            ? fmtUsd(priceValue)
             : null // Don't show "Negotiable", just don't display price
           
           return {
             id: load.load_id,
-            origin: load.origin || 'N/A',
-            destination: load.destination || 'N/A',
-            pickupDate: load.pickup_date || 'TBD',
-            deliveryDate: load.delivery_date ? `Delivery: ${load.delivery_date}` : 'TBD',
+            origin: load.origin || '',
+            destination: load.destination || '',
+            pickupDate: load.pickup_date || '',
+            deliveryDate: load.delivery_date || '',
             rate: priceDisplay, // Will be null if no rate, so we can conditionally render
+            rateValue: priceValue !== null && !isNaN(priceValue) ? Number(priceValue) : null,
             hasPrice: priceDisplay !== null,
-            perMile: load.rate_per_mile ? `$${load.rate_per_mile}/mile` : 'N/A',
+            perMile: load.rate_per_mile ? `${fmtUsd(load.rate_per_mile)}${tr('marketplace.loads.perMileSuffix', '/mile')}` : tr('common.na', 'N/A'),
             status: load.status || 'posted',
-            postedTime: load.created_at ? formatTimeAgo(load.created_at) : 'Recently posted',
+            postedTime: load.created_at ? formatTimeAgo(load.created_at) : tr('marketplace.loads.recentlyPosted', 'Recently posted'),
             carrier: load.equipment_type || 'Dry Van',
-            distance: load.distance ? `${load.distance} miles` : 'N/A',
+            distanceMiles: load.distance ? Number(load.distance) : null,
+            distance: load.distance ? `${Number(load.distance).toLocaleString(locale)} ${tr('marketplace.units.miles', 'miles')}` : tr('common.na', 'N/A'),
             urgency: load.urgency || 'normal',
             weight: weightDisplay,
             loadType: loadTypeDisplay,
@@ -326,7 +353,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
 
   useEffect(() => {
     fetchMarketplaceLoads()
-  }, [currentUser, isMarketplaceReady])
+  }, [currentUser, isMarketplaceReady, language])
 
   // Fetch marketplace drivers
   const fetchMarketplaceDrivers = async () => {
@@ -351,23 +378,24 @@ export default function Marketplace({ activeSection, setActiveSection }) {
 
           // Build endorsements array
           const endorsements = []
-          if (driver.hazmat_endorsement) endorsements.push('Hazmat')
-          if (driver.tanker_endorsement) endorsements.push('Tanker')
-          if (driver.doubles_triples) endorsements.push('Double/Triple')
-          if (driver.passenger_endorsement) endorsements.push('Passenger')
-          if (driver.school_bus_endorsement) endorsements.push('School Bus')
-          if (endorsements.length === 0) endorsements.push('None')
+          if (driver.hazmat_endorsement) endorsements.push('hazmat')
+          if (driver.tanker_endorsement) endorsements.push('tanker')
+          if (driver.doubles_triples) endorsements.push('doubles_triples')
+          if (driver.passenger_endorsement) endorsements.push('passenger')
+          if (driver.school_bus_endorsement) endorsements.push('school_bus')
+          if (endorsements.length === 0) endorsements.push('none')
 
-          // Build equipment/compliance tags
-          const equipmentTypes = []
-          if (driver.cdl_verified) equipmentTypes.push('CDL Valid')
-          if (driver.medical_card_verified) equipmentTypes.push('Med Card Active')
-          if (driver.drug_test_status === 'passed') equipmentTypes.push('MVR Clean')
+          // Build compliance badges (store codes/status instead of English strings)
+          const complianceBadges = []
+          if (driver.cdl_verified) complianceBadges.push({ code: 'cdl_valid', status: 'valid' })
+          if (driver.medical_card_verified) complianceBadges.push({ code: 'medical_card_active', status: 'valid' })
+          if (driver.drug_test_status === 'passed') complianceBadges.push({ code: 'mvr_clean', status: 'valid' })
+          if (complianceBadges.length === 0) complianceBadges.push({ code: 'pending_verification', status: 'pending' })
 
           const isCompliant = (
-            equipmentTypes.includes('CDL Valid') &&
-            equipmentTypes.includes('Med Card Active') &&
-            equipmentTypes.includes('MVR Clean')
+            driver.cdl_verified &&
+            driver.medical_card_verified &&
+            driver.drug_test_status === 'passed'
           )
 
           const yearsExpNum = typeof driver.years_experience === 'number'
@@ -376,14 +404,16 @@ export default function Marketplace({ activeSection, setActiveSection }) {
 
           return {
             id: driver.id || driver.driver_id,
-            name: driver.name || 'Unknown Driver',
+            name: driver.name || tr('marketplace.drivers.unknownDriver', 'Unknown Driver'),
             rating: driver.rating || 0,
             trips: driver.total_deliveries || driver.total_loads || 0,
-            class: rawCdlClass ? `${rawCdlClass} - ${driver.cdl_state || ''}` : 'N/A',
+            class: rawCdlClass ? `${rawCdlClass} - ${driver.cdl_state || ''}` : tr('common.na', 'N/A'),
             cdlClass: rawCdlClass,
             cdlState: String(driver.cdl_state || '').trim(),
-            location: driver.current_location || driver.current_city || 'Unknown',
-            experience: (yearsExpNum !== null && Number.isFinite(yearsExpNum)) ? `${yearsExpNum} years` : (driver.years_experience ? `${driver.years_experience} years` : 'N/A'),
+            location: driver.current_location || driver.current_city || tr('common.unknown', 'Unknown'),
+            experience: (yearsExpNum !== null && Number.isFinite(yearsExpNum))
+              ? `${Number(yearsExpNum).toLocaleString(locale)} ${tr('marketplace.drivers.years', 'years')}`
+              : (driver.years_experience ? `${Number(driver.years_experience).toLocaleString(locale)} ${tr('marketplace.drivers.years', 'years')}` : tr('common.na', 'N/A')),
             yearsExperience: (yearsExpNum !== null && Number.isFinite(yearsExpNum)) ? yearsExpNum : null,
             endorsements: endorsements,
             safetyScore: driver.safety_score || 0,
@@ -394,8 +424,8 @@ export default function Marketplace({ activeSection, setActiveSection }) {
             email: String(driver.email || driver.contact_email || '').trim(),
             phone: String(driver.phone || driver.phone_number || '').trim(),
             photo: `https://ui-avatars.com/api/?name=${encodeURIComponent(driver.name || 'Driver')}&background=random`,
-            lastActivity: 'Recently active',
-            equipmentTypes: equipmentTypes.length > 0 ? equipmentTypes : ['Pending Verification']
+            lastActivity: tr('marketplace.drivers.lastActivity.recentlyActive', 'Recently active'),
+            complianceBadges
           }
         })
         setDrivers(formattedDrivers)
@@ -426,14 +456,14 @@ export default function Marketplace({ activeSection, setActiveSection }) {
       if (response.ok) {
         // Remove driver from list in current view after request is sent.
         setDrivers(drivers.filter(d => d.id !== driver.id))
-        alert(`Request sent to ${driver.name}. They will receive a notification to accept.`)
+        alert(`${tr('marketplace.alert.requestSentTo', 'Request sent to')} ${driver.name}. ${tr('marketplace.alert.requestSentTail', 'They will receive a notification to accept.')}`)
       } else {
         const error = await response.json()
-        alert(`Failed to send request: ${error.detail || 'Unknown error'}`)
+        alert(`${tr('marketplace.alert.failedToSendRequestPrefix', 'Failed to send request:')} ${error.detail || tr('common.unknown', 'Unknown error')}`)
       }
     } catch (error) {
       console.error('Error sending hire request:', error)
-      alert('Failed to send request. Please try again.')
+      alert(tr('marketplace.alert.failedToSendRequestTryAgain', 'Failed to send request. Please try again.'))
     } finally {
       setHiringDriver(null)
     }
@@ -444,7 +474,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
     if (activeTab === 'drivers' && isMarketplaceReady) {
       fetchMarketplaceDrivers()
     }
-  }, [activeTab, currentUser, isMarketplaceReady])
+  }, [activeTab, currentUser, isMarketplaceReady, language])
 
   useEffect(() => {
     try {
@@ -453,6 +483,26 @@ export default function Marketplace({ activeSection, setActiveSection }) {
       // ignore
     }
   }, [driverFavorites])
+
+  const endorsementLabel = (code) => {
+    const c = String(code || '').trim().toLowerCase()
+    if (c === 'hazmat') return tr('marketplace.drivers.endorsements.hazmat', 'Hazmat')
+    if (c === 'tanker') return tr('marketplace.drivers.endorsements.tanker', 'Tanker')
+    if (c === 'doubles_triples') return tr('marketplace.drivers.endorsements.doublesTriples', 'Double/Triple')
+    if (c === 'passenger') return tr('marketplace.drivers.endorsements.passenger', 'Passenger')
+    if (c === 'school_bus') return tr('marketplace.drivers.endorsements.schoolBus', 'School Bus')
+    if (c === 'none') return tr('marketplace.drivers.endorsements.none', 'None')
+    return String(code || '')
+  }
+
+  const complianceBadgeLabel = (code) => {
+    const c = String(code || '').trim().toLowerCase()
+    if (c === 'cdl_valid') return tr('marketplace.drivers.badges.cdlValid', 'CDL Valid')
+    if (c === 'medical_card_active') return tr('marketplace.drivers.badges.medCardActive', 'Med Card Active')
+    if (c === 'mvr_clean') return tr('marketplace.drivers.badges.mvrClean', 'MVR Clean')
+    if (c === 'pending_verification') return tr('marketplace.drivers.badges.pendingVerification', 'Pending Verification')
+    return String(code || '')
+  }
 
   const toggleDriverEndorsement = (label) => {
     const key = String(label || '').trim()
@@ -478,7 +528,18 @@ export default function Marketplace({ activeSection, setActiveSection }) {
 
   const exportDriversCsv = (rows) => {
     const safeRows = Array.isArray(rows) ? rows : []
-    const headers = ['Name', 'Location', 'CDL Class', 'Rating', 'Trips', 'Status', 'Compliance', 'Endorsements', 'Email', 'Phone']
+    const headers = [
+      tr('common.name', 'Name'),
+      tr('marketplace.drivers.csv.location', 'Location'),
+      tr('marketplace.drivers.csv.cdlClass', 'CDL Class'),
+      tr('marketplace.drivers.csv.rating', 'Rating'),
+      tr('marketplace.drivers.csv.trips', 'Trips'),
+      tr('common.status', 'Status'),
+      tr('marketplace.drivers.csv.compliance', 'Compliance'),
+      tr('marketplace.drivers.csv.endorsements', 'Endorsements'),
+      tr('common.email', 'Email'),
+      tr('marketplace.drivers.csv.phone', 'Phone'),
+    ]
     const escape = (v) => {
       const s = String(v ?? '')
       if (s.includes('"') || s.includes(',') || s.includes('\n')) {
@@ -486,17 +547,20 @@ export default function Marketplace({ activeSection, setActiveSection }) {
       }
       return s
     }
+
     const lines = [headers.join(',')]
     for (const d of safeRows) {
-      const endorsements = Array.isArray(d?.endorsements) ? d.endorsements.join(' | ') : ''
+      const endorsements = Array.isArray(d?.endorsements)
+        ? d.endorsements.map(endorsementLabel).join(' | ')
+        : ''
       lines.push([
         escape(d?.name),
         escape(d?.location),
         escape(d?.cdlClass || d?.class),
         escape(d?.rating),
         escape(d?.trips),
-        escape(d?.available ? 'Available' : (d?.status ? String(d.status) : '')), 
-        escape(d?.compliant ? 'Compliant' : 'Non-Compliant'),
+        escape(d?.available ? tr('common.available', 'Available') : (d?.status ? String(d.status) : '')),
+        escape(d?.compliant ? tr('marketplace.drivers.details.compliant', 'Compliant') : tr('marketplace.drivers.details.nonCompliant', 'Non-Compliant')),
         escape(endorsements),
         escape(d?.email),
         escape(d?.phone),
@@ -516,18 +580,21 @@ export default function Marketplace({ activeSection, setActiveSection }) {
 
   const handlePostDriverRequest = () => {
     const to = 'help@freightpower-ai.com'
-    const subject = 'Driver Request (Carrier Marketplace)'
+    const subject = tr('marketplace.drivers.requestEmail.subject', 'Driver Request (Carrier Marketplace)')
+
+    const anyLabel = tr('marketplace.drivers.requestEmail.any', 'Any')
+    const naLabel = tr('common.na', 'N/A')
     const body = [
-      'Please help me find drivers that match the following:',
+      tr('marketplace.drivers.requestEmail.intro', 'Please help me find drivers that match the following:'),
       '',
-      `Location query: ${driverLocationQuery || 'N/A'}`,
-      `Radius: ${driverRadius || 'N/A'} miles`,
-      `CDL class: ${driverCdlClassFilter || 'Any'}`,
-      `Status: ${driverStatusFilter || 'Any'}`,
-      `Compliance: ${driverComplianceFilter || 'Any'}`,
-      `Endorsements: ${Array.from(selectedEndorsements).join(', ') || 'Any'}`,
+      `${tr('marketplace.drivers.requestEmail.locationQuery', 'Location query:')} ${driverLocationQuery || naLabel}`,
+      `${tr('marketplace.drivers.requestEmail.radius', 'Radius:')} ${driverRadius || naLabel} ${tr('marketplace.units.miles', 'miles')}`,
+      `${tr('marketplace.drivers.requestEmail.cdlClass', 'CDL class:')} ${driverCdlClassFilter || anyLabel}`,
+      `${tr('marketplace.drivers.requestEmail.status', 'Status:')} ${driverStatusFilter || anyLabel}`,
+      `${tr('marketplace.drivers.requestEmail.compliance', 'Compliance:')} ${driverComplianceFilter || anyLabel}`,
+      `${tr('marketplace.drivers.requestEmail.endorsements', 'Endorsements:')} ${Array.from(selectedEndorsements).map(endorsementLabel).join(', ') || anyLabel}`,
       '',
-      'Notes:',
+      tr('marketplace.drivers.requestEmail.notes', 'Notes:'),
       '',
     ].join('\n')
     window.location.href = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
@@ -537,17 +604,23 @@ export default function Marketplace({ activeSection, setActiveSection }) {
     const email = String(driver?.email || '').trim()
     const phone = String(driver?.phone || '').trim()
     if (email) {
-      window.location.href = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent('FreightPower - Driver Opportunity')}`
+      window.location.href = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(tr('marketplace.drivers.messageEmail.subject', 'FreightPower - Driver Opportunity'))}`
       return
     }
     if (phone) {
       window.location.href = `tel:${encodeURIComponent(phone)}`
       return
     }
-    alert('No contact info available for this driver.')
+    alert(tr('marketplace.alert.noContactInfo', 'No contact info available for this driver.'))
   }
 
-  const endorsementOptions = ['Hazmat', 'Tanker', 'Double/Triple', 'Passenger', 'School Bus']
+  const endorsementOptions = [
+    { value: 'hazmat', label: tr('marketplace.drivers.endorsements.hazmat', 'Hazmat') },
+    { value: 'tanker', label: tr('marketplace.drivers.endorsements.tanker', 'Tanker') },
+    { value: 'doubles_triples', label: tr('marketplace.drivers.endorsements.doublesTriples', 'Double/Triple') },
+    { value: 'passenger', label: tr('marketplace.drivers.endorsements.passenger', 'Passenger') },
+    { value: 'school_bus', label: tr('marketplace.drivers.endorsements.schoolBus', 'School Bus') },
+  ]
 
   const filteredDrivers = drivers
     .filter(d => {
@@ -617,7 +690,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
   // Open bid modal
   const handleOpenBidModal = (load) => {
     setSelectedLoad(load)
-    setBidRate(load.rate.replace('$', '').replace(',', '') || '')
+    setBidRate(load?.rateValue != null ? String(load.rateValue) : '')
     setBidNotes('')
     setBidEta('')
     setBidModalOpen(true)
@@ -685,7 +758,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
   // Submit bid
   const handleSubmitBid = async () => {
     if (!selectedLoad || !bidRate) {
-      alert('Please enter a bid rate')
+      alert(tr('marketplace.alert.enterBidRate', 'Please enter a bid rate'))
       return
     }
 
@@ -707,17 +780,17 @@ export default function Marketplace({ activeSection, setActiveSection }) {
 
       if (response.ok) {
         const data = await response.json()
-        alert('Bid submitted successfully!')
+        alert(tr('marketplace.alert.bidSubmitted', 'Bid submitted successfully!'))
         setBidModalOpen(false)
         // Refresh loads to show new bid status
         await fetchMarketplaceLoads()
       } else {
         const error = await response.json()
-        alert(`Failed to submit bid: ${error.detail || 'Unknown error'}`)
+        alert(`${tr('marketplace.alert.failedToSubmitBidPrefix', 'Failed to submit bid:')} ${error.detail || tr('common.unknown', 'Unknown error')}`)
       }
     } catch (error) {
       console.error('Error submitting bid:', error)
-      alert('Failed to submit bid. Please try again.')
+      alert(tr('marketplace.alert.failedToSubmitBidTryAgain', 'Failed to submit bid. Please try again.'))
     } finally {
       setSubmittingBid(false)
     }
@@ -728,9 +801,9 @@ export default function Marketplace({ activeSection, setActiveSection }) {
     const now = Date.now() / 1000
     const diff = now - timestamp
     const hours = Math.floor(diff / 3600)
-    if (hours < 1) return 'Posted < 1h ago'
-    if (hours === 1) return 'Posted 1h ago'
-    return `Posted ${hours}h ago`
+    if (hours < 1) return tr('marketplace.loads.postedLessThanOneHour', 'Posted < 1h ago')
+    if (hours === 1) return tr('marketplace.loads.postedOneHour', 'Posted 1h ago')
+    return `${tr('marketplace.loads.postedHoursAgoPrefix', 'Posted')} ${hours}${tr('marketplace.loads.postedHoursAgoSuffix', 'h ago')}`
   }
 
   // Show loading state while checking access
@@ -738,7 +811,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
     return (
       <div className="marketplace-loading" style={{ padding: '40px', textAlign: 'center' }}>
         <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: '2rem', color: '#3b82f6' }}></i>
-        <p style={{ marginTop: '10px', color: '#64748b' }}>Checking marketplace access...</p>
+        <p style={{ marginTop: '10px', color: '#64748b' }}>{tr('marketplace.loadingAccess', 'Checking marketplace access...')}</p>
       </div>
     )
   }
@@ -768,15 +841,15 @@ export default function Marketplace({ activeSection, setActiveSection }) {
         </div>
 
         <h2 style={{ fontSize: '1.75rem', color: '#1e293b', marginBottom: '10px' }}>
-          Marketplace Access Locked
+          {tr('marketplace.gated.title', 'Marketplace Access Locked')}
         </h2>
 
         <p style={{ color: '#64748b', marginBottom: '20px', maxWidth: '500px', margin: '0 auto 20px' }}>
           {gatingReason === 'consent'
-            ? 'You must sign all required consent forms to access the marketplace.'
+            ? tr('marketplace.gated.reason.consent', 'You must sign all required consent forms to access the marketplace.')
             : gatingReason === 'both'
-            ? 'Complete your onboarding and sign required consent forms to unlock the marketplace.'
-            : `Complete your onboarding to unlock the marketplace. You need a score of at least ${MARKETPLACE_THRESHOLD}% to access loads, drivers, and services.`
+            ? tr('marketplace.gated.reason.both', 'Complete your onboarding and sign required consent forms to unlock the marketplace.')
+            : `${tr('marketplace.gated.reason.score.prefix', 'Complete your onboarding to unlock the marketplace. You need a score of at least')} ${MARKETPLACE_THRESHOLD}% ${tr('marketplace.gated.reason.score.suffix', 'to access loads, drivers, and services.')}`
           }
         </p>
 
@@ -792,7 +865,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
           }}>
             <div style={{ fontWeight: '600', color: '#dc2626', marginBottom: '10px' }}>
               <i className="fa-solid fa-file-signature" style={{ marginRight: '8px' }}></i>
-              Missing Required Consents
+              {tr('marketplace.gated.missingConsents', 'Missing Required Consents')}
             </div>
             <ul style={{ textAlign: 'left', margin: 0, paddingLeft: '20px', color: '#7f1d1d' }}>
               {missingConsents.map((consent, idx) => (
@@ -814,7 +887,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                 fontWeight: '600'
               }}
             >
-              Sign Consent Forms
+              {tr('marketplace.gated.signConsents', 'Sign Consent Forms')}
             </button>
           </div>
         )}
@@ -845,9 +918,9 @@ export default function Marketplace({ activeSection, setActiveSection }) {
               {onboardingScore}%
             </div>
             <div style={{ textAlign: 'left' }}>
-              <div style={{ fontWeight: '600', color: '#1e293b' }}>Current Score</div>
+              <div style={{ fontWeight: '600', color: '#1e293b' }}>{tr('marketplace.gated.currentScore', 'Current Score')}</div>
               <div style={{ color: '#64748b', fontSize: '0.875rem' }}>
-                Need {MARKETPLACE_THRESHOLD - onboardingScore}% more to unlock
+                {tr('marketplace.gated.needPrefix', 'Need')} {MARKETPLACE_THRESHOLD - onboardingScore}% {tr('marketplace.gated.needSuffix', 'more to unlock')}
               </div>
             </div>
           </div>
@@ -873,7 +946,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
           <div style={{ textAlign: 'left', maxWidth: '400px', margin: '0 auto' }}>
             <h4 style={{ color: '#1e293b', marginBottom: '10px' }}>
               <i className="fa-solid fa-list-check" style={{ marginRight: '8px', color: '#3b82f6' }}></i>
-              Complete These Steps:
+              {tr('marketplace.gated.completeTheseSteps', 'Complete These Steps:')}
             </h4>
             <ul style={{ listStyle: 'none', padding: 0 }}>
               {nextActions.slice(0, 3).map((action, index) => (
@@ -923,7 +996,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
           }}
         >
           <i className="fa-solid fa-arrow-left" style={{ marginRight: '8px' }}></i>
-          Go to Dashboard
+          {tr('marketplace.gated.goToDashboard', 'Go to Dashboard')}
         </button>
       </div>
     )
@@ -934,8 +1007,8 @@ export default function Marketplace({ activeSection, setActiveSection }) {
     <div className="marketplace">
       <header className="marketplace-header">
         <div className="marketplace-header-content">
-          <h1>Marketplace</h1>
-          <p className="marketplace-subtitle">Find loads, hire drivers, and connect with service providers</p>
+          <h1>{tr('marketplace.title', 'Marketplace')}</h1>
+          <p className="marketplace-subtitle">{tr('marketplace.subtitle', 'Find loads, hire drivers, and connect with service providers')}</p>
         </div>
       </header>
 
@@ -946,19 +1019,19 @@ export default function Marketplace({ activeSection, setActiveSection }) {
             className={`marketplace-tab ${activeTab === 'loads' ? 'active' : ''}`}
             onClick={() => setActiveTab('loads')}
           >
-            Loads
+            {tr('marketplace.tabs.loads', 'Loads')}
           </button>
           <button
             className={`marketplace-tab ${activeTab === 'drivers' ? 'active' : ''}`}
             onClick={() => setActiveTab('drivers')}
           >
-            Drivers
+            {tr('marketplace.tabs.drivers', 'Drivers')}
           </button>
           <button
             className={`marketplace-tab ${activeTab === 'services' ? 'active' : ''}`}
             onClick={() => setActiveTab('services')}
           >
-            Services
+            {tr('marketplace.tabs.services', 'Services')}
           </button>
         </div>
       </div>
@@ -973,13 +1046,13 @@ export default function Marketplace({ activeSection, setActiveSection }) {
             <input
               type="text"
               className="marketplace-search"
-              placeholder="Search loads, drivers, or services..."
+              placeholder={tr('marketplace.search.placeholder', 'Search loads, drivers, or services...')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
             <button className="btn small-cd">
               <i className="fa-solid fa-search" />
-              Search
+              {tr('marketplace.search.button', 'Search')}
             </button>
           </div>
         </div>
@@ -990,16 +1063,16 @@ export default function Marketplace({ activeSection, setActiveSection }) {
             value={equipmentType}
             onChange={(e) => setEquipmentType(e.target.value)}
           >
-            <option value="">Equipment Type</option>
-            <option value="dry-van">Dry Van</option>
-            <option value="reefer">Reefer</option>
-            <option value="flatbed">Flatbed</option>
+            <option value="">{tr('marketplace.filters.equipmentType', 'Equipment Type')}</option>
+            <option value="dry-van">{tr('marketplace.filters.equipmentType.dryVan', 'Dry Van')}</option>
+            <option value="reefer">{tr('marketplace.filters.equipmentType.reefer', 'Reefer')}</option>
+            <option value="flatbed">{tr('marketplace.filters.equipmentType.flatbed', 'Flatbed')}</option>
           </select>
 
           <input
             type="text"
             className="marketplace-filter-input"
-            placeholder="Origin"
+            placeholder={tr('marketplace.filters.origin', 'Origin')}
             value={origin}
             onChange={(e) => setOrigin(e.target.value)}
           />
@@ -1007,7 +1080,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
           <input
             type="text"
             className="marketplace-filter-input"
-            placeholder="Destination"
+            placeholder={tr('marketplace.filters.destination', 'Destination')}
             value={destination}
             onChange={(e) => setDestination(e.target.value)}
           />
@@ -1015,7 +1088,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
           <input
             type="text"
             className="marketplace-filter-input"
-            placeholder="mm/dd/yyyy"
+            placeholder={tr('marketplace.filters.datePlaceholder', 'mm/dd/yyyy')}
             value={dateRange}
             onChange={(e) => setDateRange(e.target.value)}
           />
@@ -1025,10 +1098,10 @@ export default function Marketplace({ activeSection, setActiveSection }) {
             value={distance}
             onChange={(e) => setDistance(e.target.value)}
           >
-            <option value="">Distance</option>
-            <option value="0-100">0-100 miles</option>
-            <option value="100-500">100-500 miles</option>
-            <option value="500+">500+ miles</option>
+            <option value="">{tr('marketplace.filters.distance', 'Distance')}</option>
+            <option value="0-100">{tr('marketplace.filters.distance.0_100', '0-100 miles')}</option>
+            <option value="100-500">{tr('marketplace.filters.distance.100_500', '100-500 miles')}</option>
+            <option value="500+">{tr('marketplace.filters.distance.500Plus', '500+ miles')}</option>
           </select>
             </div>
           </div>
@@ -1066,7 +1139,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
             // Distance filter
             let matchesDistance = true;
             if (distance) {
-              const loadDistance = parseFloat(load.distance?.replace(' miles', '').replace(',', '') || '0');
+              const loadDistance = Number(load.distanceMiles ?? 0);
               if (distance === '0-100') {
                 matchesDistance = loadDistance >= 0 && loadDistance <= 100;
               } else if (distance === '100-500') {
@@ -1087,13 +1160,13 @@ export default function Marketplace({ activeSection, setActiveSection }) {
               <div className="load-card-header">
                 <div className="route-info">
                   <div className="route-cities">
-                    <span className="origin">{load.origin}</span>
+                    <span className="origin">{load.origin || tr('common.na', 'N/A')}</span>
                     <i className="fa-solid fa-arrow-right route-arrow" />
-                    <span className="destination">{load.destination}</span>
+                    <span className="destination">{load.destination || tr('common.na', 'N/A')}</span>
                     <div 
                       className="location-icon-wrapper"
                       onMouseEnter={(e) => {
-                        if (load.origin && load.destination && load.origin !== 'N/A' && load.destination !== 'N/A') {
+                        if (load.origin && load.destination) {
                           const rect = e.currentTarget.getBoundingClientRect()
                           const popupWidth = 400
                           const popupHeight = 360
@@ -1131,7 +1204,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                         // Don't close immediately - let the popup's onMouseEnter handle it
                       }}
                     >
-                      <i className="fa-solid fa-location-dot location-icon" title="View route on map" />
+                      <i className="fa-solid fa-location-dot location-icon" title={tr('marketplace.loads.viewRouteOnMap', 'View route on map')} />
                       {hoveredLoadId === load.id && (
                         <div 
                           className="map-popup"
@@ -1147,15 +1220,15 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                           <div className="map-popup-content">
                             <div className="map-popup-header">
                               <span>
-                                {load.origin} → {load.destination}
+                                {(load.origin || tr('common.na', 'N/A'))} → {(load.destination || tr('common.na', 'N/A'))}
                                 {hoverRouteByLoadId?.[load.id]?.distance_miles != null && (
-                                  <> • {Number(hoverRouteByLoadId[load.id].distance_miles).toFixed(1)} mi</>
+                                  <> • {Number(hoverRouteByLoadId[load.id].distance_miles).toFixed(1)} {tr('marketplace.units.mi', 'mi')}</>
                                 )}
                               </span>
                               <button 
                                 className="map-popup-close"
                                 onClick={() => setHoveredLoadId(null)}
-                                aria-label="Close map"
+                                aria-label={tr('marketplace.loads.closeMap', 'Close map')}
                               >
                                 ×
                               </button>
@@ -1182,12 +1255,12 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                     </div>
                   </div>
                   <div className="route-meta">
-                    <span className="pickup-date">{load.pickupDate}</span>
-                    <span className="delivery-date">{load.deliveryDate}</span>
+                    <span className="pickup-date">{load.pickupDate || tr('common.tbd', 'TBD')}</span>
+                    <span className="delivery-date">{load.deliveryDate ? `${tr('marketplace.loads.deliveryPrefix', 'Delivery:')} ${load.deliveryDate}` : tr('common.tbd', 'TBD')}</span>
                   </div>
                 </div>
                 <div className={`status-badge status-${load.status.toLowerCase()}`}>
-                  {load.status}
+                  {tr(`marketplace.loads.status.${String(load.status || '').toLowerCase()}`, load.status)}
                 </div>
               </div>
 
@@ -1196,7 +1269,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                   {load.hasPrice ? (
                     <div className="rate-amount">{load.rate}</div>
                   ) : (
-                    <div className="rate-amount" style={{ color: '#9ca3af', fontSize: '14px' }}>Rate not specified</div>
+                    <div className="rate-amount" style={{ color: '#9ca3af', fontSize: '14px' }}>{tr('marketplace.loads.rateNotSpecified', 'Rate not specified')}</div>
                   )}
                   {load.perMile !== 'N/A' && (
                     <div className="rate-per-mile">{load.perMile}</div>
@@ -1205,7 +1278,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                 <div className="load-meta">
                   <div className="carrier-info">
                     <i className="fa-solid fa-truck" />
-                    {load.carrier}
+                    {getEquipmentLabel(load.carrier)}
                   </div>
                   <div className="distance-info">
                     <i className="fa-solid fa-route" />
@@ -1248,7 +1321,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                       gap: '4px'
                     }}>
                       <i className="fa-solid fa-route"></i>
-                      +{load.additional_routes.length} stops
+                      +{load.additional_routes.length} {tr('marketplace.loads.stops', 'stops')}
                     </div>
                   )}
                 </div>
@@ -1268,16 +1341,16 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                       fontWeight: '500',
                       marginBottom: '8px'
                     }}>
-                      {load.myOffer.status === 'accepted' ? '✓ Bid Accepted' :
-                       load.myOffer.status === 'rejected' ? '✗ Bid Rejected' :
-                       '⏳ Bid Request Sent'}
+                      {load.myOffer.status === 'accepted' ? tr('marketplace.loads.bidAccepted', '✓ Bid Accepted') :
+                       load.myOffer.status === 'rejected' ? tr('marketplace.loads.bidRejected', '✗ Bid Rejected') :
+                       tr('marketplace.loads.bidRequestSent', '⏳ Bid Request Sent')}
                     </div>
                     <button 
                       className="btn small ghost-cd" 
                       style={{width: '100%'}}
                       onClick={() => handleOpenDetailsModal(load)}
                     >
-                      View Details
+                      {tr('marketplace.loads.viewDetails', 'View Details')}
                     </button>
                   </>
                 ) : (
@@ -1287,14 +1360,14 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                       style={{width: '100%'}}
                       onClick={() => handleOpenBidModal(load)}
                     >
-                      Submit Bid
+                      {tr('marketplace.loads.submitBid', 'Submit Bid')}
                     </button>
                     <button 
                       className="btn small ghost-cd" 
                       style={{width: '100%'}}
                       onClick={() => handleOpenDetailsModal(load)}
                     >
-                      View Details
+                      {tr('marketplace.loads.viewDetails', 'View Details')}
                     </button>
                   </>
                 )}
@@ -1313,11 +1386,11 @@ export default function Marketplace({ activeSection, setActiveSection }) {
           <div className="marketplace-drivers-filters">
             <div className="marketplace-filters-top-row">
               <div className="marketplace-filter-group">
-                <label className="marketplace-filter-label">Location & Radius</label>
+                <label className="marketplace-filter-label">{tr('marketplace.drivers.filters.locationRadius', 'Location & Radius')}</label>
                 <div className="marketplace-location-inputs">
                   <input 
                     className="marketplace-filter-input marketplace-location-input" 
-                    placeholder="City, State or ZIP"
+                    placeholder={tr('marketplace.drivers.filters.locationPlaceholder', 'City, State or ZIP')}
                     value={driverLocationQuery}
                     onChange={(e) => setDriverLocationQuery(e.target.value)}
                   />
@@ -1326,66 +1399,66 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                     value={driverRadius}
                     onChange={(e) => setDriverRadius(e.target.value)}
                   >
-                    <option value="25">25 miles</option>
-                    <option value="50">50 miles</option>
-                    <option value="100">100 miles</option>
+                    <option value="25">{tr('marketplace.drivers.filters.radius.25', '25 miles')}</option>
+                    <option value="50">{tr('marketplace.drivers.filters.radius.50', '50 miles')}</option>
+                    <option value="100">{tr('marketplace.drivers.filters.radius.100', '100 miles')}</option>
                   </select>
                 </div>
               </div>
               
               <div className="marketplace-filter-group">
-                <label className="marketplace-filter-label">CDL Class</label>
+                <label className="marketplace-filter-label">{tr('marketplace.drivers.filters.cdlClass', 'CDL Class')}</label>
                 <select
                   className="marketplace-filter-select"
                   value={driverCdlClassFilter}
                   onChange={(e) => setDriverCdlClassFilter(e.target.value)}
                 >
-                  <option value="">All Classes</option>
-                  <option value="A">CDL Class A</option>
-                  <option value="B">CDL Class B</option>
-                  <option value="C">CDL Class C</option>
+                  <option value="">{tr('marketplace.drivers.filters.cdlClass.all', 'All Classes')}</option>
+                  <option value="A">{tr('marketplace.drivers.filters.cdlClass.a', 'CDL Class A')}</option>
+                  <option value="B">{tr('marketplace.drivers.filters.cdlClass.b', 'CDL Class B')}</option>
+                  <option value="C">{tr('marketplace.drivers.filters.cdlClass.c', 'CDL Class C')}</option>
                 </select>
               </div>
               
               <div className="marketplace-filter-group">
-                <label className="marketplace-filter-label">Status</label>
+                <label className="marketplace-filter-label">{tr('marketplace.drivers.filters.status', 'Status')}</label>
                 <select
                   className="marketplace-filter-select"
                   value={driverStatusFilter}
                   onChange={(e) => setDriverStatusFilter(e.target.value)}
                 >
-                  <option value="">All Status</option>
-                  <option value="available">Available</option>
-                  <option value="assigned">Assigned</option>
-                  <option value="off_duty">Off Duty</option>
+                  <option value="">{tr('marketplace.drivers.filters.status.all', 'All Status')}</option>
+                  <option value="available">{tr('marketplace.drivers.filters.status.available', 'Available')}</option>
+                  <option value="assigned">{tr('marketplace.drivers.filters.status.assigned', 'Assigned')}</option>
+                  <option value="off_duty">{tr('marketplace.drivers.filters.status.offDuty', 'Off Duty')}</option>
                 </select>
               </div>
               
               <div className="marketplace-filter-group">
-                <label className="marketplace-filter-label">Compliance</label>
+                <label className="marketplace-filter-label">{tr('marketplace.drivers.filters.compliance', 'Compliance')}</label>
                 <select
                   className="marketplace-filter-select"
                   value={driverComplianceFilter}
                   onChange={(e) => setDriverComplianceFilter(e.target.value)}
                 >
-                  <option value="">All</option>
-                  <option value="compliant">Compliant</option>
-                  <option value="non_compliant">Non-Compliant</option>
+                  <option value="">{tr('marketplace.drivers.filters.compliance.all', 'All')}</option>
+                  <option value="compliant">{tr('marketplace.drivers.filters.compliance.compliant', 'Compliant')}</option>
+                  <option value="non_compliant">{tr('marketplace.drivers.filters.compliance.nonCompliant', 'Non-Compliant')}</option>
                 </select>
               </div>
             </div>
             
             <div className="marketplace-endorsements-row">
-              <span className="marketplace-filter-label">Endorsements</span>
+              <span className="marketplace-filter-label">{tr('marketplace.drivers.filters.endorsements', 'Endorsements')}</span>
               <div className="marketplace-endorsement-chips">
                 {endorsementOptions.map(opt => (
                   <button
-                    key={opt}
+                    key={opt.value}
                     type="button"
-                    className={`marketplace-endorsement-chip ${selectedEndorsements.has(opt) ? 'marketplace-selected' : ''}`}
-                    onClick={() => toggleDriverEndorsement(opt)}
+                    className={`marketplace-endorsement-chip ${selectedEndorsements.has(opt.value) ? 'marketplace-selected' : ''}`}
+                    onClick={() => toggleDriverEndorsement(opt.value)}
                   >
-                    {opt}
+                    {opt.label}
                   </button>
                 ))}
               </div>
@@ -1393,15 +1466,17 @@ export default function Marketplace({ activeSection, setActiveSection }) {
           </div>
           
           <div className="marketplace-drivers-results-bar">
-            <div className="marketplace-results-count">{sortedDrivers.length.toLocaleString()} driver{sortedDrivers.length === 1 ? '' : 's'} found</div>
+            <div className="marketplace-results-count">
+              {sortedDrivers.length.toLocaleString(locale)} {sortedDrivers.length === 1 ? tr('marketplace.drivers.results.driver', 'driver') : tr('marketplace.drivers.results.drivers', 'drivers')} {tr('marketplace.drivers.results.found', 'found')}
+            </div>
             <div className="marketplace-results-controls">
               <div className="marketplace-sort-group">
-                <label>Sort by:</label>
+                <label>{tr('marketplace.drivers.sortBy', 'Sort by:')}</label>
                 <select className="marketplace-sort-select" value={driverSort} onChange={(e) => setDriverSort(e.target.value)}>
-                  <option value="relevance">Relevance</option>
-                  <option value="rating">Rating</option>
-                  <option value="experience">Experience</option>
-                  <option value="location">Location</option>
+                  <option value="relevance">{tr('marketplace.drivers.sort.relevance', 'Relevance')}</option>
+                  <option value="rating">{tr('marketplace.drivers.sort.rating', 'Rating')}</option>
+                  <option value="experience">{tr('marketplace.drivers.sort.experience', 'Experience')}</option>
+                  <option value="location">{tr('marketplace.drivers.sort.location', 'Location')}</option>
                 </select>
               </div>
             </div>
@@ -1409,27 +1484,27 @@ export default function Marketplace({ activeSection, setActiveSection }) {
 
           <div className="drivers-actions">
           <button className="btn small ghost-cd" type="button" onClick={() => exportDriversCsv(sortedDrivers)} disabled={sortedDrivers.length === 0}>
-            <i className="fa-solid fa-download"></i> Export
+            <i className="fa-solid fa-download"></i> {tr('common.export', 'Export')}
           </button>
           <button className="btn small-cd" type="button" onClick={handlePostDriverRequest}>
-            <i className="fa-solid fa-plus"></i> Post Driver Request
+            <i className="fa-solid fa-plus"></i> {tr('marketplace.drivers.postRequest', 'Post Driver Request')}
           </button>
             </div>
 
           {driversLoading ? (
             <div style={{ padding: '40px', textAlign: 'center' }}>
               <i className="fa-solid fa-spinner fa-spin" style={{ fontSize: '24px', marginRight: '10px' }}></i>
-              Loading drivers...
+              {tr('marketplace.drivers.loading', 'Loading drivers...')}
             </div>
           ) : drivers.length === 0 ? (
             <div style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
               <i className="fa-solid fa-users" style={{ fontSize: '48px', marginBottom: '20px', opacity: 0.5 }}></i>
-              <p>No available drivers found</p>
+              <p>{tr('marketplace.drivers.empty', 'No available drivers found')}</p>
             </div>
           ) : sortedDrivers.length === 0 ? (
             <div style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
               <i className="fa-solid fa-filter" style={{ fontSize: '44px', marginBottom: '16px', opacity: 0.5 }}></i>
-              <p>No drivers match your filters</p>
+              <p>{tr('marketplace.drivers.noMatch', 'No drivers match your filters')}</p>
             </div>
           ) : (
           <div className="marketplace-drivers-list">
@@ -1446,33 +1521,33 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                         <div className="marketplace-driver-rating">
                           <i className="fa-solid fa-star" />
                           <span>{driver.rating}</span>
-                          <span className="marketplace-trips-count">• {driver.trips} trips</span>
+                          <span className="marketplace-trips-count">• {driver.trips} {tr('marketplace.drivers.trips', 'trips')}</span>
                         </div>
                       </div>
                       
                       <div className="marketplace-driver-details">
                         <div className="marketplace-detail-item">
-                          <span className="marketplace-detail-label">CDL INFO</span>
-                          <span className="marketplace-detail-value">Class {driver.class}</span>
-                          <span className="marketplace-detail-sub">Exp: {driver.experience}</span>
+                          <span className="marketplace-detail-label">{tr('marketplace.drivers.card.cdlInfo', 'CDL INFO')}</span>
+                          <span className="marketplace-detail-value">{tr('marketplace.drivers.card.classPrefix', 'Class')} {driver.class}</span>
+                          <span className="marketplace-detail-sub">{tr('marketplace.drivers.card.expPrefix', 'Exp:')} {driver.experience}</span>
                         </div>
                         
                         <div className="marketplace-detail-item">
-                          <span className="marketplace-detail-label">LOCATION</span>
+                          <span className="marketplace-detail-label">{tr('marketplace.drivers.card.location', 'LOCATION')}</span>
                           <span className="marketplace-detail-value">{driver.location}</span>
                           <span className="marketplace-detail-sub">{driver.lastActivity}</span>
                         </div>
                         
                         <div className="marketplace-detail-item">
-                          <span className="marketplace-detail-label">STATUS</span>
+                          <span className="marketplace-detail-label">{tr('marketplace.drivers.card.status', 'STATUS')}</span>
                           <span className={`marketplace-detail-value marketplace-status-${driver.available ? 'available' : 'unavailable'}`}>
                             <i className="fa-solid fa-circle" />
-                            {driver.available ? 'Available' : 'Not Available'}
+                            {driver.available ? tr('marketplace.drivers.card.available', 'Available') : tr('marketplace.drivers.card.notAvailable', 'Not Available')}
                           </span>
                         </div>
                         
                         <div className="marketplace-detail-item">
-                          <span className="marketplace-detail-label">AI SAFETY SCORE</span>
+                          <span className="marketplace-detail-label">{tr('marketplace.drivers.card.aiSafetyScore', 'AI SAFETY SCORE')}</span>
                           <span className="marketplace-detail-value marketplace-safety-score">
                             {driver.safetyScore}/100
                           </span>
@@ -1481,19 +1556,24 @@ export default function Marketplace({ activeSection, setActiveSection }) {
 
                       <div className="marketplace-driver-tags">
                         <div className="marketplace-endorsements">
-                          <span className="marketplace-tags-label">Endorsements:</span>
+                          <span className="marketplace-tags-label">{tr('marketplace.drivers.card.endorsements', 'Endorsements:')}</span>
                           {driver.endorsements.map((endorsement, index) => (
-                            <span key={index} className="marketplace-endorsement-tag">{endorsement}</span>
+                            <span key={index} className="marketplace-endorsement-tag">{endorsementLabel(endorsement)}</span>
                           ))}
                         </div>
                         
                         <div className="marketplace-equipment-status">
-                          {driver.equipmentTypes.map((equipment, index) => (
-                            <span key={index} className={`marketplace-equipment-tag ${equipment.includes('Valid') || equipment.includes('Active') || equipment.includes('Clean') ? 'valid' : equipment.includes('Expiring') ? 'warning' : 'invalid'}`}>
-                              <i className={`fa-solid ${equipment.includes('Valid') || equipment.includes('Active') || equipment.includes('Clean') ? 'fa-check-circle' : equipment.includes('Expiring') ? 'fa-exclamation-triangle' : 'fa-times-circle'}`} />
-                              {equipment}
-                            </span>
-                          ))}
+                          {(Array.isArray(driver.complianceBadges) ? driver.complianceBadges : []).map((badge, index) => {
+                            const status = String(badge?.status || '')
+                            const cls = status === 'valid' ? 'valid' : (status === 'warning' || status === 'pending') ? 'warning' : 'invalid'
+                            const icon = status === 'valid' ? 'fa-check-circle' : (status === 'warning' || status === 'pending') ? 'fa-exclamation-triangle' : 'fa-times-circle'
+                            return (
+                              <span key={index} className={`marketplace-equipment-tag ${cls}`}>
+                                <i className={`fa-solid ${icon}`} />
+                                {complianceBadgeLabel(badge?.code)}
+                              </span>
+                            )
+                          })}
                         </div>
                       </div>
                     </div>
@@ -1506,12 +1586,12 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                       disabled={hiringDriver === driver.id || !driver.available}
                     >
                       <i className="fa-solid fa-plus" />
-                      {hiringDriver === driver.id ? 'Hiring...' : 'Hire Driver'}
+                      {hiringDriver === driver.id ? tr('marketplace.drivers.hiring', 'Hiring...') : tr('marketplace.drivers.hire', 'Hire Driver')}
                     </button>
                     <div className="marketplace-driver-menu">
                       <button
                         className="marketplace-menu-btn"
-                        title="View Details"
+                        title={tr('marketplace.drivers.menu.viewDetails', 'View Details')}
                         type="button"
                         onClick={() => setExpandedDriverId(expandedDriverId === driver.id ? null : driver.id)}
                       >
@@ -1519,7 +1599,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                       </button>
                       <button
                         className="marketplace-menu-btn"
-                        title="Message"
+                        title={tr('marketplace.drivers.menu.message', 'Message')}
                         type="button"
                         onClick={() => messageDriver(driver)}
                       >
@@ -1527,7 +1607,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                       </button>
                       <button
                         className="marketplace-menu-btn"
-                        title="Favorite"
+                        title={tr('marketplace.drivers.menu.favorite', 'Favorite')}
                         type="button"
                         onClick={() => toggleDriverFavorite(driver.id)}
                       >
@@ -1540,14 +1620,14 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                 {expandedDriverId === driver.id && (
                   <div style={{ padding: '12px 16px', borderTop: '1px solid #e5e7eb', display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-                      <div style={{ fontWeight: 700 }}>Driver Details</div>
-                      <button className="btn small ghost-cd" type="button" onClick={() => setExpandedDriverId(null)}>Close</button>
+                      <div style={{ fontWeight: 700 }}>{tr('marketplace.drivers.details.title', 'Driver Details')}</div>
+                      <button className="btn small ghost-cd" type="button" onClick={() => setExpandedDriverId(null)}>{tr('common.close', 'Close')}</button>
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                      <div><div style={{ fontSize: 12, color: '#6b7280', fontWeight: 700 }}>Compliance</div><div style={{ fontWeight: 700 }}>{driver.compliant ? 'Compliant' : 'Non-Compliant'}</div></div>
-                      <div><div style={{ fontSize: 12, color: '#6b7280', fontWeight: 700 }}>On-time</div><div style={{ fontWeight: 700 }}>{driver.onTime ? 'High' : 'Normal'}</div></div>
-                      <div><div style={{ fontSize: 12, color: '#6b7280', fontWeight: 700 }}>Email</div><div style={{ fontWeight: 700, wordBreak: 'break-word' }}>{driver.email || 'N/A'}</div></div>
-                      <div><div style={{ fontSize: 12, color: '#6b7280', fontWeight: 700 }}>Phone</div><div style={{ fontWeight: 700 }}>{driver.phone || 'N/A'}</div></div>
+                      <div><div style={{ fontSize: 12, color: '#6b7280', fontWeight: 700 }}>{tr('marketplace.drivers.details.compliance', 'Compliance')}</div><div style={{ fontWeight: 700 }}>{driver.compliant ? tr('marketplace.drivers.details.compliant', 'Compliant') : tr('marketplace.drivers.details.nonCompliant', 'Non-Compliant')}</div></div>
+                      <div><div style={{ fontSize: 12, color: '#6b7280', fontWeight: 700 }}>{tr('marketplace.drivers.details.onTime', 'On-time')}</div><div style={{ fontWeight: 700 }}>{driver.onTime ? tr('marketplace.drivers.details.onTime.high', 'High') : tr('marketplace.drivers.details.onTime.normal', 'Normal')}</div></div>
+                      <div><div style={{ fontSize: 12, color: '#6b7280', fontWeight: 700 }}>{tr('common.email', 'Email')}</div><div style={{ fontWeight: 700, wordBreak: 'break-word' }}>{driver.email || tr('common.na', 'N/A')}</div></div>
+                      <div><div style={{ fontSize: 12, color: '#6b7280', fontWeight: 700 }}>{tr('marketplace.drivers.details.phone', 'Phone')}</div><div style={{ fontWeight: 700 }}>{driver.phone || tr('common.na', 'N/A')}</div></div>
                     </div>
                   </div>
                 )}
@@ -1558,7 +1638,9 @@ export default function Marketplace({ activeSection, setActiveSection }) {
 
           {!driversLoading && sortedDrivers.length > 0 && (
             <div className="drivers-pagination">
-              <span>Showing {sortedDrivers.length} driver{sortedDrivers.length !== 1 ? 's' : ''}</span>
+              <span>
+                {tr('marketplace.drivers.showing', 'Showing')} {sortedDrivers.length.toLocaleString(locale)} {sortedDrivers.length === 1 ? tr('marketplace.drivers.results.driver', 'driver') : tr('marketplace.drivers.results.drivers', 'drivers')}
+              </span>
             </div>
           )}
         </div>
@@ -1572,34 +1654,34 @@ export default function Marketplace({ activeSection, setActiveSection }) {
           <div className="services-header">
             <div className="services-tabs">
               <button className={`service-tab ${serviceTab === 'all' ? 'active' : ''}`} onClick={() => setServiceTab('all')}>
-                <i className="fa-solid fa-th"></i> All Services
+                <i className="fa-solid fa-th"></i> {tr('marketplace.services.tabs.all', 'All Services')}
               </button>
               <button className={`service-tab ${serviceTab === 'fuel' ? 'active' : ''}`} onClick={() => setServiceTab('fuel')}>
-                <i className="fa-solid fa-gas-pump"></i> Fuel
+                <i className="fa-solid fa-gas-pump"></i> {tr('marketplace.services.tabs.fuel', 'Fuel')}
               </button>
               <button className={`service-tab ${serviceTab === 'parking' ? 'active' : ''}`} onClick={() => setServiceTab('parking')}>
-                <i className="fa-solid fa-square-parking"></i> Parking
+                <i className="fa-solid fa-square-parking"></i> {tr('marketplace.services.tabs.parking', 'Parking')}
               </button>
               <button className={`service-tab ${serviceTab === 'parts' ? 'active' : ''}`} onClick={() => setServiceTab('parts')}>
-                <i className="fa-solid fa-cog"></i> Parts
+                <i className="fa-solid fa-cog"></i> {tr('marketplace.services.tabs.parts', 'Parts')}
               </button>
               <button className={`service-tab ${serviceTab === 'maintenance' ? 'active' : ''}`} onClick={() => setServiceTab('maintenance')}>
-                <i className="fa-solid fa-wrench"></i> Maintenance
+                <i className="fa-solid fa-wrench"></i> {tr('marketplace.services.tabs.maintenance', 'Maintenance')}
               </button>
               <button className={`service-tab ${serviceTab === 'factoring' ? 'active' : ''}`} onClick={() => setServiceTab('factoring')}>
-                <i className="fa-solid fa-dollar-sign"></i> Factoring
+                <i className="fa-solid fa-dollar-sign"></i> {tr('marketplace.services.tabs.factoring', 'Factoring')}
               </button>
               <button className={`service-tab ${serviceTab === 'insurance' ? 'active' : ''}`} onClick={() => setServiceTab('insurance')}>
-                <i className="fa-solid fa-shield-alt"></i> Insurance
+                <i className="fa-solid fa-shield-alt"></i> {tr('marketplace.services.tabs.insurance', 'Insurance')}
               </button>
               <button className={`service-tab ${serviceTab === 'food' ? 'active' : ''}`} onClick={() => setServiceTab('food')}>
-                <i className="fa-solid fa-utensils"></i> Food
+                <i className="fa-solid fa-utensils"></i> {tr('marketplace.services.tabs.food', 'Food')}
               </button>
               <button className={`service-tab ${serviceTab === 'favourites' ? 'active' : ''}`} onClick={() => setServiceTab('food')}>
-                <i className="fa-solid fa-heart"></i> Favourites
+                <i className="fa-solid fa-heart"></i> {tr('marketplace.services.tabs.favourites', 'Favourites')}
               </button>
               <button className={`service-tab ${serviceTab === 'history' ? 'active' : ''}`} onClick={() => setServiceTab('food')}>
-                <i className="fa-solid fa-history"></i> History
+                <i className="fa-solid fa-history"></i> {tr('marketplace.services.tabs.history', 'History')}
               </button>
             </div>
           </div>
@@ -1607,19 +1689,19 @@ export default function Marketplace({ activeSection, setActiveSection }) {
             {/* Services Grid and Info */}
             <div className="services-left">
               <div className="services-info">
-                <span>Showing 247 service providers</span>
+                <span>{tr('marketplace.services.showingPrefix', 'Showing')} 247 {tr('marketplace.services.showingSuffix', 'service providers')}</span>
                 <div className="sort-controls">
-                  <label htmlFor="services-sort-select">Sort by:</label>
+                  <label htmlFor="services-sort-select">{tr('marketplace.services.sortBy', 'Sort by:')}</label>
                   <select id="services-sort-select" className="marketplace-filter-select" style={{ minWidth: 120 }}>
-                    <option value="relevance">Relevance</option>
-                    <option value="rating">Rating</option>
-                    <option value="reviews">Reviews</option>
-                    <option value="distance">Distance</option>
+                    <option value="relevance">{tr('marketplace.services.sort.relevance', 'Relevance')}</option>
+                    <option value="rating">{tr('marketplace.services.sort.rating', 'Rating')}</option>
+                    <option value="reviews">{tr('marketplace.services.sort.reviews', 'Reviews')}</option>
+                    <option value="distance">{tr('marketplace.services.sort.distance', 'Distance')}</option>
                   </select>
                   {isMobile && (
                     <button
                       className="btn-filter-toggle"
-                      aria-label="Show Filters"
+                      aria-label={tr('marketplace.services.showFilters', 'Show Filters')}
                       onClick={() => setShowSidebar((v) => !v)}
                       style={{ marginLeft: 8 }}
                     >
@@ -1638,21 +1720,21 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                       <div className="provider-logo red">PJ</div>
                       <div>
                         <h3>Pilot Flying J</h3>
-                        <p>Fuel Network</p>
+                        <p>{tr('marketplace.services.cards.fuelNetwork', 'Fuel Network')}</p>
                       </div>
                     </div>
                     <i className="fa-regular fa-heart"></i>
                   </div>
                   <div className="service-features">
-                    <span className="feature nationwide"><i class="fa-solid fa-location-dot"></i> Nationwide Coverage</span>
+                    <span className="feature nationwide"><i class="fa-solid fa-location-dot"></i> {tr('marketplace.services.cards.nationwideCoverage', 'Nationwide Coverage')}</span>
                     <div className="rating">
                       <span><i className="fa-solid fa-star" style={{color:'#fbbf24'}}></i> 4.8</span>
-                      <span>(1,247 reviews)</span>
+                      <span>({tr('marketplace.services.cards.sampleReviews1247', '1,247 reviews')})</span>
                     </div>
-                    <span className="discount"><i class="fa-solid fa-tag"></i> 12¢ off per gallon</span>
-                    <span className="cashback">Plus 2% cash back on purchases</span>
+                    <span className="discount"><i class="fa-solid fa-tag"></i> {tr('marketplace.services.cards.sampleDiscount12c', '12¢ off per gallon')}</span>
+                    <span className="cashback">{tr('marketplace.services.cards.sampleCashBack2', 'Plus 2% cash back on purchases')}</span>
                   </div>
-                  <button className="btn small-cd" style={{width:'100%'}}>Request Quote</button>
+                  <button className="btn small-cd" style={{width:'100%'}}>{tr('marketplace.services.cards.requestQuote', 'Request Quote')}</button>
                 </div>
 
                 {/* TruckPro Service Card */}
@@ -1662,21 +1744,21 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                       <div className="provider-logo blue">TP</div>
                       <div>
                         <h3>TruckPro Service</h3>
-                        <p>Maintenance & Repair</p>
+                        <p>{tr('marketplace.services.cards.maintenanceRepair', 'Maintenance & Repair')}</p>
                       </div>
                     </div>
                     <i className="fa-regular fa-heart"></i>
                   </div>
                   <div className="service-features">
-                    <span className="location"><i class="fa-solid fa-location-dot"></i> Dallas, TX - 50 mile radius</span>
+                    <span className="location"><i class="fa-solid fa-location-dot"></i> {tr('marketplace.services.cards.sampleDallasRadius', 'Dallas, TX - 50 mile radius')}</span>
                     <div className="rating">
                       <span><i className="fa-solid fa-star" style={{color:'#fbbf24'}}></i> 4.9</span>
-                      <span>(456 reviews)</span>
+                      <span>({tr('marketplace.services.cards.sampleReviews456', '456 reviews')})</span>
                     </div>
-                    <span className="cd-emergency"><i class="fa-solid fa-clock"></i> 24/7 Emergency Service</span>
-                    <span className="mobile">Mobile repair units available</span>
+                    <span className="cd-emergency"><i class="fa-solid fa-clock"></i> {tr('marketplace.services.cards.emergency247', '24/7 Emergency Service')}</span>
+                    <span className="mobile">{tr('marketplace.services.cards.mobileUnits', 'Mobile repair units available')}</span>
                   </div>
-                  <button className="btn small-cd" style={{width:'100%'}}>Request Quote</button>
+                  <button className="btn small-cd" style={{width:'100%'}}>{tr('marketplace.services.cards.requestQuote', 'Request Quote')}</button>
                 </div>
 
                 {/* Progressive Commercial Card */}
@@ -1686,21 +1768,21 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                       <div className="provider-logo">PC</div>
                       <div>
                         <h3>Progressive Commercial</h3>
-                        <p>Commercial Insurance</p>
+                        <p>{tr('marketplace.services.cards.commercialInsurance', 'Commercial Insurance')}</p>
                       </div>
                     </div>
                     <i className="fa-solid fa-heart red"></i>
                   </div>
                   <div className="service-features">
-                    <span className="coverage"><i class="fa-solid fa-location-dot"></i> All 50 States</span>
+                    <span className="coverage"><i class="fa-solid fa-location-dot"></i> {tr('marketplace.services.cards.all50States', 'All 50 States')}</span>
                     <div className="rating">
                       <span> 4.6</span>
-                      <span>(2,134 reviews)</span>
+                      <span>({tr('marketplace.services.cards.sampleReviews2134', '2,134 reviews')})</span>
                     </div>
-                    <span className="savings"><i class="fa-solid fa-percent"></i> Save up to 25%</span>
-                    <span className="discount">Multi-policy discount available</span>
+                    <span className="savings"><i class="fa-solid fa-percent"></i> {tr('marketplace.services.cards.saveUpTo25', 'Save up to 25%')}</span>
+                    <span className="discount">{tr('marketplace.services.cards.multiPolicyDiscount', 'Multi-policy discount available')}</span>
                   </div>
-                  <button className="btn small-cd" style={{width:'100%'}}>Get Quote</button>
+                  <button className="btn small-cd" style={{width:'100%'}}>{tr('marketplace.services.cards.getQuote', 'Get Quote')}</button>
                 </div>
 
                 {/* RTS Financial Card */}
@@ -1710,21 +1792,21 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                       <div className="provider-logo dollar">$</div>
                       <div>
                         <h3>RTS Financial</h3>
-                        <p>Invoice Factoring</p>
+                        <p>{tr('marketplace.services.cards.invoiceFactoring', 'Invoice Factoring')}</p>
                       </div>
                     </div>
                     <i className="fa-regular fa-heart"></i>
                   </div>
                   <div className="service-features">
-                    <span className="service-type"><i class="fa-solid fa-location-dot"></i> Nationwide Service</span>
+                    <span className="service-type"><i class="fa-solid fa-location-dot"></i> {tr('marketplace.services.cards.nationwideService', 'Nationwide Service')}</span>
                     <div className="rating">
                       <span><i className="fa-solid fa-star" style={{color:'#fbbf24'}}></i> 4.7</span>
-                      <span>(892 reviews)</span>
+                      <span>({tr('marketplace.services.cards.sampleReviews892', '892 reviews')})</span>
                     </div>
-                    <span className="funding"><i class="fa-solid fa-bolt"></i> Same-day funding</span>
-                    <span className="rate">Rates starting at 1.5%</span>
+                    <span className="funding"><i class="fa-solid fa-bolt"></i> {tr('marketplace.services.cards.sameDayFunding', 'Same-day funding')}</span>
+                    <span className="rate">{tr('marketplace.services.cards.ratesStarting15', 'Rates starting at 1.5%')}</span>
                   </div>
-                  <button className="btn small-cd" style={{width:'100%'}}>Apply Now</button>
+                  <button className="btn small-cd" style={{width:'100%'}}>{tr('marketplace.services.cards.applyNow', 'Apply Now')}</button>
                 </div>
 
                 {/* SecurePark Network Card */}
@@ -1734,21 +1816,21 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                       <div className="provider-logo purple">SP</div>
                       <div>
                         <h3>SecurePark Network</h3>
-                        <p>Truck Parking</p>
+                        <p>{tr('marketplace.services.cards.truckParking', 'Truck Parking')}</p>
                       </div>
                     </div>
                     <i className="fa-regular fa-heart"></i>
                   </div>
                   <div className="service-features">
-                    <span className="locations"><i class="fa-solid fa-location-dot"></i> 150+ Locations</span>
+                    <span className="locations"><i class="fa-solid fa-location-dot"></i> {tr('marketplace.services.cards.sample150Locations', '150+ Locations')}</span>
                     <div className="rating">
                       <span><i className="fa-solid fa-star" style={{color:'#fbbf24'}}></i> 4.5</span>
-                      <span>(678 reviews)</span>
+                      <span>({tr('marketplace.services.cards.sampleReviews678', '678 reviews')})</span>
                     </div>
-                    <span className="security"><i class="fa-solid fa-shield-alt"></i> Secure & Monitored</span>
-                    <span className="available">24/7 security & reservations</span>
+                    <span className="security"><i class="fa-solid fa-shield-alt"></i> {tr('marketplace.services.cards.secureMonitored', 'Secure & Monitored')}</span>
+                    <span className="available">{tr('marketplace.services.cards.securityReservations', '24/7 security & reservations')}</span>
                   </div>
-                  <button className="btn small-cd" style={{width:'100%'}}>Reserve Spot</button>
+                  <button className="btn small-cd" style={{width:'100%'}}>{tr('marketplace.services.cards.reserveSpot', 'Reserve Spot')}</button>
                 </div>
 
                 {/* FleetParts Direct Card */}
@@ -1758,26 +1840,26 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                       <div className="provider-logo orange">FP</div>
                       <div>
                         <h3>FleetParts Direct</h3>
-                        <p>Truck Parts & Components</p>
+                        <p>{tr('marketplace.services.cards.truckPartsComponents', 'Truck Parts & Components')}</p>
                       </div>
                     </div>
                     <i className="fa-regular fa-heart"></i>
                   </div>
                   <div className="service-features">
-                    <span className="shipping"><i class="fa-solid fa-location-dot"></i> Same-day shipping</span>
+                    <span className="shipping"><i class="fa-solid fa-location-dot"></i> {tr('marketplace.services.cards.sameDayShipping', 'Same-day shipping')}</span>
                     <div className="rating">
                       <span><i className="fa-solid fa-star" style={{color:'#fbbf24'}}></i> 4.8</span>
-                      <span>(1,523 reviews)</span>
+                      <span>({tr('marketplace.services.cards.sampleReviews1523', '1,523 reviews')})</span>
                     </div>
-                    <span className="free-shipping"><i class="fa-solid fa-truck"></i> Free shipping $200+</span>
-                    <span className="oem">OEM & aftermarket parts</span>
+                    <span className="free-shipping"><i class="fa-solid fa-truck"></i> {tr('marketplace.services.cards.freeShipping200', 'Free shipping $200+')}</span>
+                    <span className="oem">{tr('marketplace.services.cards.oemAftermarket', 'OEM & aftermarket parts')}</span>
                   </div>
-                  <button className="btn small-cd" style={{width:'100%'}}>Browse Parts</button>
+                  <button className="btn small-cd" style={{width:'100%'}}>{tr('marketplace.services.cards.browseParts', 'Browse Parts')}</button>
                 </div>
               </div>
 
               <div className="load-more">
-                <button className="btn small ghost-cd">Load More Providers</button>
+                <button className="btn small ghost-cd">{tr('marketplace.services.loadMoreProviders', 'Load More Providers')}</button>
               </div>
             </div>
 
@@ -1787,30 +1869,30 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                 {isMobile && (
                   <button
                     className="btn-filter-close"
-                    aria-label="Close Filters"
+                    aria-label={tr('marketplace.services.closeFilters', 'Close Filters')}
                     onClick={() => setShowSidebar(false)}
                     style={{ float: 'right', marginBottom: 12 }}
                   >
                     <i className="fa-solid fa-times"></i>
                   </button>
                 )}
-                <h3>Filters</h3>
+                <h3>{tr('marketplace.services.filters.title', 'Filters')}</h3>
                 
                 <div className="filter-section">
-                  <h4>Location</h4>
-                  <input type="text" placeholder="Enter city or ZIP code" className="location-input" />
+                  <h4>{tr('marketplace.services.filters.location', 'Location')}</h4>
+                  <input type="text" placeholder={tr('marketplace.services.filters.locationPlaceholder', 'Enter city or ZIP code')} className="location-input" />
                   <div className="radius-selector">
-                    <label>Radius</label>
+                    <label>{tr('marketplace.services.filters.radius', 'Radius')}</label>
                     <select>
-                      <option>25 miles</option>
-                      <option>50 miles</option>
-                      <option>100 miles</option>
+                      <option>{tr('marketplace.drivers.filters.radius.25', '25 miles')}</option>
+                      <option>{tr('marketplace.drivers.filters.radius.50', '50 miles')}</option>
+                      <option>{tr('marketplace.drivers.filters.radius.100', '100 miles')}</option>
                     </select>
                   </div>
                 </div>
 
                 <div className="filter-section">
-                  <h4>Minimum Rating</h4>
+                  <h4>{tr('marketplace.services.filters.minimumRating', 'Minimum Rating')}</h4>
                   <div className="rating-filters">
                     <label><input type="radio" name="rating" />
                       <i className="fa-solid fa-star" style={{color:'#fbbf24'}}></i>
@@ -1818,65 +1900,65 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                       <i className="fa-solid fa-star" style={{color:'#fbbf24'}}></i>
                       <i className="fa-solid fa-star" style={{color:'#fbbf24'}}></i>
                       <i className="fa-solid fa-star" style={{color:'#fbbf24'}}></i>
-                      5 stars
+                      {tr('marketplace.services.filters.stars.5', '5 stars')}
                     </label>
                     <label><input type="radio" name="rating" />
                       <i className="fa-solid fa-star" style={{color:'#fbbf24'}}></i>
                       <i className="fa-solid fa-star" style={{color:'#fbbf24'}}></i>
                       <i className="fa-solid fa-star" style={{color:'#fbbf24'}}></i>
                       <i className="fa-solid fa-star" style={{color:'#fbbf24'}}></i>
-                      4+ stars
+                      {tr('marketplace.services.filters.stars.4plus', '4+ stars')}
                     </label>
                     <label><input type="radio" name="rating" />
                       <i className="fa-solid fa-star" style={{color:'#fbbf24'}}></i>
                       <i className="fa-solid fa-star" style={{color:'#fbbf24'}}></i>
                       <i className="fa-solid fa-star" style={{color:'#fbbf24'}}></i>
-                      3+ stars
+                      {tr('marketplace.services.filters.stars.3plus', '3+ stars')}
                     </label>
                   </div>
                 </div>
 
                 <div className="filter-section">
-                  <h4>Service Features</h4>
+                  <h4>{tr('marketplace.services.filters.serviceFeatures', 'Service Features')}</h4>
                   <div className="feature-checkboxes">
-                    <label><input type="checkbox" /> 24/7 Service</label>
-                    <label><input type="checkbox" checked /> Mobile Service</label>
-                    <label><input type="checkbox" checked /> Same-day Service</label>
-                    <label><input type="checkbox" /> Warranty Included</label>
+                    <label><input type="checkbox" /> {tr('marketplace.services.filters.features.247', '24/7 Service')}</label>
+                    <label><input type="checkbox" checked /> {tr('marketplace.services.filters.features.mobile', 'Mobile Service')}</label>
+                    <label><input type="checkbox" checked /> {tr('marketplace.services.filters.features.sameDay', 'Same-day Service')}</label>
+                    <label><input type="checkbox" /> {tr('marketplace.services.filters.features.warranty', 'Warranty Included')}</label>
                   </div>
                 </div>
 
                 <div className="filter-section">
-                  <h4>Price Range</h4>
+                  <h4>{tr('marketplace.services.filters.priceRange', 'Price Range')}</h4>
                   <div className="price-filters">
-                    <label><input type="radio" name="price" /> $ - Budget</label>
-                    <label><input type="radio" name="price" checked /> $$ - Moderate</label>
-                    <label><input type="radio" name="price" /> $$$ - Premium</label>
+                    <label><input type="radio" name="price" /> {tr('marketplace.services.filters.price.budget', '$ - Budget')}</label>
+                    <label><input type="radio" name="price" checked /> {tr('marketplace.services.filters.price.moderate', '$$ - Moderate')}</label>
+                    <label><input type="radio" name="price" /> {tr('marketplace.services.filters.price.premium', '$$$ - Premium')}</label>
                   </div>
                 </div>
 
                 <div className="filter-actions">
-                  <button className="btn small-cd">Apply Filters</button>
-                  <button className="btn small ghost-cd">Clear All Filters</button>
+                  <button className="btn small-cd">{tr('marketplace.services.filters.apply', 'Apply Filters')}</button>
+                  <button className="btn small ghost-cd">{tr('marketplace.services.filters.clear', 'Clear All Filters')}</button>
                 </div>
 
                 <div className="quick-actions">
-                  <h4>Quick Actions</h4>
+                  <h4>{tr('marketplace.services.quickActions', 'Quick Actions')}</h4>
                   <button className="btn small ghost-cd" style={{ width: '100%' }}>
                     <i className="fa-solid fa-add"></i>
-                    Request Service
+                    {tr('marketplace.services.quick.requestService', 'Request Service')}
                   </button>
                   <button className="btn small ghost-cd" style={{ width: '100%' }}>
                     <i className="fa-solid fa-exclamation-circle"></i>
-                    Request Emergency Service
+                    {tr('marketplace.services.quick.requestEmergency', 'Request Emergency Service')}
                   </button>
                   <button className="btn small ghost-cd" style={{ width: '100%' }}>
                     <i className="fa-solid fa-calendar"></i>
-                    Schedule Maintenance
+                    {tr('marketplace.services.quick.scheduleMaintenance', 'Schedule Maintenance')}
                   </button>
                   <button className="btn small ghost-cd" style={{ width: '100%' }}>
                     <i className="fa-solid fa-shield"></i>
-                    Get Insurance Quote
+                    {tr('marketplace.services.quick.getInsuranceQuote', 'Get Insurance Quote')}
                   </button>
                 </div>
               </div>
@@ -1884,8 +1966,8 @@ export default function Marketplace({ activeSection, setActiveSection }) {
           </div>
           </div>
 
-          <div className="services-coming-soon-overlay" role="note" aria-label="Coming soon">
-            <div className="services-coming-soon-badge">Coming soon</div>
+          <div className="services-coming-soon-overlay" role="note" aria-label={tr('common.comingSoon', 'Coming soon')}>
+            <div className="services-coming-soon-badge">{tr('common.comingSoon', 'Coming soon')}</div>
           </div>
         </div>
       )}
@@ -1919,7 +2001,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
               alignItems: 'center',
               marginBottom: '20px'
             }}>
-              <h2 style={{ margin: 0, fontSize: '24px', color: '#1e293b' }}>Submit Bid</h2>
+              <h2 style={{ margin: 0, fontSize: '24px', color: '#1e293b' }}>{tr('marketplace.bidModal.title', 'Submit Bid')}</h2>
               <button 
                 onClick={() => setBidModalOpen(false)}
                 style={{
@@ -1935,12 +2017,12 @@ export default function Marketplace({ activeSection, setActiveSection }) {
             </div>
 
             <div style={{ marginBottom: '20px', padding: '15px', background: '#f8fafc', borderRadius: '8px' }}>
-              <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '8px' }}>Load Route</div>
+              <div style={{ fontSize: '14px', color: '#64748b', marginBottom: '8px' }}>{tr('marketplace.bidModal.loadRoute', 'Load Route')}</div>
               <div style={{ fontSize: '18px', fontWeight: '600', color: '#1e293b' }}>
                 {selectedLoad.origin} → {selectedLoad.destination}
               </div>
               <div style={{ fontSize: '14px', color: '#64748b', marginTop: '8px' }}>
-                Pickup: {selectedLoad.pickupDate} | {selectedLoad.distance}
+                {tr('marketplace.bidModal.pickup', 'Pickup:')} {selectedLoad.pickupDate || tr('common.tbd', 'TBD')} | {selectedLoad.distance}
               </div>
             </div>
 
@@ -1958,13 +2040,13 @@ export default function Marketplace({ activeSection, setActiveSection }) {
 
             <div style={{ marginBottom: '20px' }}>
               <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#1e293b' }}>
-                Your Bid Rate ($) *
+                {tr('marketplace.bidModal.yourBidRate', 'Your Bid Rate ($) *')}
               </label>
               <input
                 type="number"
                 value={bidRate}
                 onChange={(e) => setBidRate(e.target.value)}
-                placeholder="Enter your bid amount"
+                placeholder={tr('marketplace.bidModal.bidAmountPlaceholder', 'Enter your bid amount')}
                 style={{
                   width: '100%',
                   padding: '12px',
@@ -1977,13 +2059,13 @@ export default function Marketplace({ activeSection, setActiveSection }) {
 
             <div style={{ marginBottom: '20px' }}>
               <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#1e293b' }}>
-                Estimated Delivery Time (Optional)
+                {tr('marketplace.bidModal.estimatedDeliveryTime', 'Estimated Delivery Time (Optional)')}
               </label>
               <input
                 type="text"
                 value={bidEta}
                 onChange={(e) => setBidEta(e.target.value)}
-                placeholder="e.g., 2 days, Dec 28"
+                placeholder={tr('marketplace.bidModal.etaPlaceholder', 'e.g., 2 days, Dec 28')}
                 style={{
                   width: '100%',
                   padding: '12px',
@@ -1996,12 +2078,12 @@ export default function Marketplace({ activeSection, setActiveSection }) {
 
             <div style={{ marginBottom: '25px' }}>
               <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#1e293b' }}>
-                Notes (Optional)
+                {tr('marketplace.bidModal.notes', 'Notes (Optional)')}
               </label>
               <textarea
                 value={bidNotes}
                 onChange={(e) => setBidNotes(e.target.value)}
-                placeholder="Any additional information for the shipper..."
+                placeholder={tr('marketplace.bidModal.notesPlaceholder', 'Any additional information for the shipper...')}
                 rows={4}
                 style={{
                   width: '100%',
@@ -2031,7 +2113,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                   cursor: submittingBid || !bidRate ? 'not-allowed' : 'pointer'
                 }}
               >
-                {submittingBid ? 'Submitting...' : 'Submit Bid'}
+                {submittingBid ? tr('marketplace.bidModal.submitting', 'Submitting...') : tr('marketplace.loads.submitBid', 'Submit Bid')}
               </button>
               <button
                 onClick={() => setBidModalOpen(false)}
@@ -2048,7 +2130,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                   cursor: 'pointer'
                 }}
               >
-                Cancel
+                {tr('common.cancel', 'Cancel')}
               </button>
             </div>
           </div>
@@ -2086,57 +2168,57 @@ export default function Marketplace({ activeSection, setActiveSection }) {
             onClick={(e) => e.stopPropagation()}
           >
             <h2 style={{ marginBottom: '20px', fontSize: '24px', fontWeight: '700', color: '#333' }}>
-              Load Details
+              {tr('marketplace.loadDetails.title', 'Load Details')}
             </h2>
 
             {/* Route Information */}
             <div style={{ marginBottom: '25px' }}>
               <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#555', marginBottom: '15px' }}>
-                Route Information
+                {tr('marketplace.loadDetails.routeInformation', 'Route Information')}
               </h3>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
                 <div>
                   <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
-                    <strong>Pickup Location:</strong>
+                    <strong>{tr('marketplace.loadDetails.pickupLocation', 'Pickup Location:')}</strong>
                   </p>
                   <p style={{ fontSize: '14px', color: '#333' }}>
-                    {selectedLoad.pickup_city || selectedLoad.origin || 'N/A'}
+                    {selectedLoad.pickup_city || selectedLoad.origin || tr('common.na', 'N/A')}
                     {selectedLoad.pickup_state && `, ${selectedLoad.pickup_state}`}
                     {selectedLoad.pickup_zip && ` ${selectedLoad.pickup_zip}`}
                   </p>
                 </div>
                 <div>
                   <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
-                    <strong>Delivery Location:</strong>
+                    <strong>{tr('marketplace.loadDetails.deliveryLocation', 'Delivery Location:')}</strong>
                   </p>
                   <p style={{ fontSize: '14px', color: '#333' }}>
-                    {selectedLoad.delivery_city || selectedLoad.destination || 'N/A'}
+                    {selectedLoad.delivery_city || selectedLoad.destination || tr('common.na', 'N/A')}
                     {selectedLoad.delivery_state && `, ${selectedLoad.delivery_state}`}
                     {selectedLoad.delivery_zip && ` ${selectedLoad.delivery_zip}`}
                   </p>
                 </div>
                 <div>
                   <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
-                    <strong>Pickup Date:</strong>
+                    <strong>{tr('marketplace.loadDetails.pickupDate', 'Pickup Date:')}</strong>
                   </p>
                   <p style={{ fontSize: '14px', color: '#333' }}>
                     {selectedLoad.pickup_date ? 
                       (typeof selectedLoad.pickup_date === 'string' && selectedLoad.pickup_date.includes('T') 
-                        ? new Date(selectedLoad.pickup_date).toLocaleDateString()
+                        ? new Date(selectedLoad.pickup_date).toLocaleDateString(locale)
                         : selectedLoad.pickup_date) 
-                      : 'TBD'}
+                      : tr('common.tbd', 'TBD')}
                   </p>
                 </div>
                 <div>
                   <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
-                    <strong>Delivery Date:</strong>
+                    <strong>{tr('marketplace.loadDetails.deliveryDate', 'Delivery Date:')}</strong>
                   </p>
                   <p style={{ fontSize: '14px', color: '#333' }}>
                     {selectedLoad.delivery_date ? 
                       (typeof selectedLoad.delivery_date === 'string' && selectedLoad.delivery_date.includes('T') 
-                        ? new Date(selectedLoad.delivery_date).toLocaleDateString()
+                        ? new Date(selectedLoad.delivery_date).toLocaleDateString(locale)
                         : selectedLoad.delivery_date) 
-                      : 'TBD'}
+                      : tr('common.tbd', 'TBD')}
                   </p>
                 </div>
               </div>
@@ -2147,24 +2229,24 @@ export default function Marketplace({ activeSection, setActiveSection }) {
              (selectedLoad.additional_routes && selectedLoad.additional_routes.length > 0) ? (
               <div style={{ marginBottom: '25px' }}>
                 <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#555', marginBottom: '15px' }}>
-                  Additional Stops & Pickup Points
+                  {tr('marketplace.loadDetails.additionalStops', 'Additional Stops & Pickup Points')}
                 </h3>
                 {(selectedLoad.additional_stops || selectedLoad.additional_routes || []).map((stop, index) => (
                   <div key={index} style={{ marginBottom: '10px', padding: '12px', backgroundColor: '#f9f9f9', borderRadius: '6px', borderLeft: '3px solid #3b82f6' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '5px' }}>
                       <p style={{ fontSize: '14px', color: '#333', fontWeight: '600', margin: 0 }}>
-                        {stop.type === 'pickup' ? '📦 Pickup' : stop.type === 'delivery' ? '🚚 Delivery' : '📍 Stop'} {index + 1}
+                        {stop.type === 'pickup' ? `📦 ${tr('marketplace.loadDetails.stop.pickup', 'Pickup')}` : stop.type === 'delivery' ? `🚚 ${tr('marketplace.loadDetails.stop.delivery', 'Delivery')}` : `📍 ${tr('marketplace.loadDetails.stop.stop', 'Stop')}`} {index + 1}
                       </p>
                       {stop.date && (
                         <p style={{ fontSize: '12px', color: '#666', margin: 0 }}>
                           {typeof stop.date === 'string' && stop.date.includes('T') 
-                            ? new Date(stop.date).toLocaleDateString()
+                            ? new Date(stop.date).toLocaleDateString(locale)
                             : stop.date}
                         </p>
                       )}
                     </div>
                     <p style={{ fontSize: '14px', color: '#333', margin: 0 }}>
-                      {stop.location || stop.city || stop.address || 'N/A'}
+                      {stop.location || stop.city || stop.address || tr('common.na', 'N/A')}
                       {stop.city && stop.state && `, ${stop.state}`}
                       {stop.zip && ` ${stop.zip}`}
                     </p>
@@ -2176,52 +2258,52 @@ export default function Marketplace({ activeSection, setActiveSection }) {
             {/* Equipment and Load Details */}
             <div style={{ marginBottom: '25px' }}>
               <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#555', marginBottom: '15px' }}>
-                Equipment & Load Details
+                {tr('marketplace.loadDetails.equipmentAndLoadDetails', 'Equipment & Load Details')}
               </h3>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
                 <div>
                   <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
-                    <strong>Equipment Type:</strong>
+                    <strong>{tr('marketplace.loadDetails.equipmentType', 'Equipment Type:')}</strong>
                   </p>
                   <p style={{ fontSize: '14px', color: '#333' }}>{selectedLoad.equipment_type}</p>
                 </div>
                 <div>
                   <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
-                    <strong>Load Type:</strong>
+                    <strong>{tr('marketplace.loadDetails.loadType', 'Load Type:')}</strong>
                   </p>
-                  <p style={{ fontSize: '14px', color: '#333' }}>{selectedLoad.load_type || 'Full'}</p>
+                  <p style={{ fontSize: '14px', color: '#333' }}>{selectedLoad.load_type || tr('marketplace.loadDetails.loadTypeFull', 'Full')}</p>
                 </div>
                 <div>
                   <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
-                    <strong>Weight:</strong>
+                    <strong>{tr('marketplace.loadDetails.weight', 'Weight:')}</strong>
                   </p>
                   <p style={{ fontSize: '14px', color: '#333' }}>
-                    {selectedLoad.weight ? `${selectedLoad.weight} lbs` : 'N/A'}
+                    {selectedLoad.weight ? `${Number(selectedLoad.weight).toLocaleString(locale)} ${tr('common.lbs', 'lbs')}` : tr('common.na', 'N/A')}
                   </p>
                 </div>
                 <div>
                   <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
-                    <strong>Total Distance:</strong>
+                    <strong>{tr('marketplace.loadDetails.totalDistance', 'Total Distance:')}</strong>
                   </p>
                   <p style={{ fontSize: '14px', color: '#333', fontWeight: '600' }}>
-                    {selectedLoad.total_distance ? `${selectedLoad.total_distance} miles` : 
-                     selectedLoad.distance ? `${selectedLoad.distance}${typeof selectedLoad.distance === 'number' ? ' miles' : ''}` : 
-                     selectedLoad.estimated_distance ? `${selectedLoad.estimated_distance} miles` : 'N/A'}
+                    {selectedLoad.total_distance ? `${Number(selectedLoad.total_distance).toLocaleString(locale)} ${tr('marketplace.units.miles', 'miles')}` : 
+                     (typeof selectedLoad.distance === 'number' ? `${Number(selectedLoad.distance).toLocaleString(locale)} ${tr('marketplace.units.miles', 'miles')}` : (selectedLoad.distance || '')) || 
+                     (selectedLoad.estimated_distance ? `${Number(selectedLoad.estimated_distance).toLocaleString(locale)} ${tr('marketplace.units.miles', 'miles')}` : tr('common.na', 'N/A'))}
                   </p>
                 </div>
                 <div>
                   <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
-                    <strong>Total Price Offered:</strong>
+                    <strong>{tr('marketplace.loadDetails.totalPriceOffered', 'Total Price Offered:')}</strong>
                   </p>
                   <p style={{ fontSize: '14px', color: '#059669', fontWeight: '600' }}>
-                    {selectedLoad.total_price ? `$${selectedLoad.total_price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 
-                     selectedLoad.rate ? `$${typeof selectedLoad.rate === 'string' ? selectedLoad.rate.replace('$', '').replace(',', '') : selectedLoad.rate}` : 
-                     selectedLoad.linehaul_rate ? `$${selectedLoad.linehaul_rate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : 'Negotiable'}
+                    {selectedLoad.total_price ? fmtUsd(selectedLoad.total_price) : 
+                     selectedLoad.rate ? fmtUsd(selectedLoad.rate) : 
+                     selectedLoad.linehaul_rate ? fmtUsd(selectedLoad.linehaul_rate) : tr('marketplace.loadDetails.negotiable', 'Negotiable')}
                   </p>
                 </div>
                 <div>
                   <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
-                    <strong>Status:</strong>
+                    <strong>{tr('marketplace.loadDetails.status', 'Status:')}</strong>
                   </p>
                   <p style={{ fontSize: '14px', color: '#333' }}>{selectedLoad.status}</p>
                 </div>
@@ -2232,20 +2314,20 @@ export default function Marketplace({ activeSection, setActiveSection }) {
             {(selectedLoad.shipper_info || selectedLoad.shipper_company_name || selectedLoad.shipper_compliance_score !== undefined) && (
               <div style={{ marginBottom: '25px' }}>
                 <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#555', marginBottom: '15px' }}>
-                  Shipper Information
+                  {tr('marketplace.loadDetails.shipperInformation', 'Shipper Information')}
                 </h3>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
                   <div>
                     <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
-                      <strong>Company Name:</strong>
+                      <strong>{tr('marketplace.loadDetails.companyName', 'Company Name:')}</strong>
                     </p>
                     <p style={{ fontSize: '14px', color: '#333', fontWeight: '600' }}>
-                      {selectedLoad.shipper_company_name || selectedLoad.shipper_info?.company_name || 'N/A'}
+                      {selectedLoad.shipper_company_name || selectedLoad.shipper_info?.company_name || tr('common.na', 'N/A')}
                     </p>
                   </div>
                   <div>
                     <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
-                      <strong>Compliance Score:</strong>
+                      <strong>{tr('marketplace.loadDetails.complianceScore', 'Compliance Score:')}</strong>
                     </p>
                     <p style={{ 
                       fontSize: '14px', 
@@ -2253,13 +2335,13 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                              selectedLoad.shipper_compliance_score >= 60 ? '#d97706' : '#dc2626',
                       fontWeight: '600'
                     }}>
-                      {selectedLoad.shipper_compliance_score !== undefined ? `${selectedLoad.shipper_compliance_score}%` : 'N/A'}
+                      {selectedLoad.shipper_compliance_score !== undefined ? `${selectedLoad.shipper_compliance_score}%` : tr('common.na', 'N/A')}
                     </p>
                   </div>
                   {selectedLoad.shipper_info?.contact_name && (
                     <div>
                       <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
-                        <strong>Contact Name:</strong>
+                        <strong>{tr('marketplace.loadDetails.contactName', 'Contact Name:')}</strong>
                       </p>
                       <p style={{ fontSize: '14px', color: '#333' }}>
                         {selectedLoad.shipper_info.contact_name}
@@ -2269,7 +2351,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                   {selectedLoad.shipper_info?.email && (
                     <div>
                       <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
-                        <strong>Email:</strong>
+                        <strong>{tr('common.email', 'Email')}:</strong>
                       </p>
                       <p style={{ fontSize: '14px', color: '#333' }}>{selectedLoad.shipper_info.email}</p>
                     </div>
@@ -2277,7 +2359,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                   {selectedLoad.shipper_info?.phone && (
                     <div>
                       <p style={{ fontSize: '14px', color: '#666', marginBottom: '5px' }}>
-                        <strong>Phone:</strong>
+                        <strong>{tr('marketplace.loadDetails.phone', 'Phone')}:</strong>
                       </p>
                       <p style={{ fontSize: '14px', color: '#333' }}>{selectedLoad.shipper_info.phone}</p>
                     </div>
@@ -2290,7 +2372,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
             {selectedLoad.special_instructions && (
               <div style={{ marginBottom: '25px' }}>
                 <h3 style={{ fontSize: '18px', fontWeight: '600', color: '#555', marginBottom: '15px' }}>
-                  Special Instructions
+                  {tr('marketplace.loadDetails.specialInstructions', 'Special Instructions')}
                 </h3>
                 <p style={{ fontSize: '14px', color: '#333', lineHeight: '1.6' }}>
                   {selectedLoad.special_instructions}
@@ -2316,7 +2398,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                   cursor: 'pointer'
                 }}
               >
-                Place Bid
+                {tr('marketplace.loadDetails.placeBid', 'Place Bid')}
               </button>
               <button
                 onClick={() => setDetailsModalOpen(false)}
@@ -2331,7 +2413,7 @@ export default function Marketplace({ activeSection, setActiveSection }) {
                   cursor: 'pointer'
                 }}
               >
-                Close
+                {tr('common.close', 'Close')}
               </button>
             </div>
           </div>
